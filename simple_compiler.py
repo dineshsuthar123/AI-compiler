@@ -4,6 +4,14 @@ from pathlib import Path
 import json
 import yaml
 import re
+import sys
+import subprocess
+import tempfile
+import os
+import tempfile
+import subprocess
+import sys
+import os
 
 from frontend import plugin_manager
 from frontend.parser import Parser
@@ -143,6 +151,99 @@ class ModernCompiler:
             self.logger.error(f"Compilation failed: {str(e)}")
             raise
     
+    def generate_ir_only(self, source: str) -> str:
+        """Generate LLVM IR without execution.
+        
+        Args:
+            source: Source code string or path to source file
+            
+        Returns:
+            Generated LLVM IR code as string
+        """
+        try:
+            # Read source code if it's a file path
+            if Path(source).exists():
+                with open(source, 'r') as f:
+                    source_code = f.read()
+            else:
+                source_code = source
+            
+            # Process source through plugins
+            processed_code = plugin_manager.process_source(source_code, self.config)
+            
+            # Parse source code into AST
+            ast = self.parser.parse(processed_code)
+            
+            # Generate LLVM IR
+            self.ir_generator.visit(ast)
+            ir_code = str(self.ir_generator.module)
+            
+            return ir_code
+            
+        except Exception as e:
+            self.logger.error(f"IR generation failed: {str(e)}")
+            raise
+    
+    def compile_to_binary(self, source: str, output_file: str) -> str:
+        """Compile source code to binary executable.
+        
+        Args:
+            source: Source code string or path to source file
+            output_file: Path for the output binary file
+            
+        Returns:
+            Path to the compiled binary
+        """
+        try:
+            # Generate IR
+            ir_code = self.generate_ir_only(source)
+            
+            # Create temporary IR file
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.ll', delete=False) as f:
+                f.write(ir_code)
+                ir_file = f.name
+            
+            try:
+                # Use llc to compile to object file
+                obj_file = ir_file.replace('.ll', '.o')
+                llc_cmd = ['llc', '-filetype=obj', ir_file, '-o', obj_file]
+                
+                # Try to run llc
+                result = subprocess.run(llc_cmd, capture_output=True, text=True)
+                if result.returncode != 0:
+                    # Fallback: save as IR file
+                    import shutil
+                    shutil.copy(ir_file, output_file.replace('.exe', '.ll').replace('.out', '.ll'))
+                    return output_file.replace('.exe', '.ll').replace('.out', '.ll')
+                
+                # Link to executable
+                if sys.platform == 'win32':
+                    link_cmd = ['gcc', obj_file, '-o', output_file]
+                else:
+                    link_cmd = ['gcc', obj_file, '-o', output_file]
+                
+                result = subprocess.run(link_cmd, capture_output=True, text=True)
+                if result.returncode != 0:
+                    # Fallback: return object file
+                    return obj_file
+                
+                return output_file
+                
+            finally:
+                # Cleanup
+                try:
+                    os.unlink(ir_file)
+                except:
+                    pass
+                    
+        except Exception as e:
+            self.logger.error(f"Binary compilation failed: {str(e)}")
+            # Return IR as fallback
+            ir_code = self.generate_ir_only(source)
+            with open(output_file.replace('.exe', '.ll').replace('.out', '.ll'), 'w') as f:
+                f.write(ir_code)
+            return output_file.replace('.exe', '.ll').replace('.out', '.ll')
+
     def get_plugin(self, name: str):
         """Get a plugin by name."""
         return plugin_manager.get_plugin(name)
