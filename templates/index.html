@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Compiler - Next Generation</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/monokai.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700&family=Roboto:wght@300;400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #00ff9d;
+            --secondary: #00b8ff;
+            --dark: #0a192f;
+            --darker: #020c1b;
+            --light: #ccd6f6;
+            --accent: #ff2e63;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Roboto', sans-serif;
+            background: var(--dark);
+            color: var(--light);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        .background {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(45deg, var(--darker), var(--dark));
+            z-index: -1;
+        }
+
+        .grid {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: 
+                linear-gradient(rgba(0, 255, 157, 0.1) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 255, 157, 0.1) 1px, transparent 1px);
+            background-size: 30px 30px;
+            z-index: -1;
+            opacity: 0.5;
+        }
+
+        .navbar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            background: rgba(10, 25, 47, 0.8);
+            backdrop-filter: blur(10px);
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 1000;
+            border-bottom: 1px solid rgba(0, 255, 157, 0.1);
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 2rem;
+        }
+
+        .nav-link {
+            color: var(--light);
+            text-decoration: none;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 0.9rem;
+            letter-spacing: 1px;
+            transition: color 0.3s ease;
+        }
+
+        .nav-link:hover {
+            color: var(--primary);
+        }
+
+        .hero {
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 0 2rem;
+            position: relative;
+        }
+
+        .hero-content {
+            max-width: 800px;
+        }
+
+        .hero h1 {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 4rem;
+            color: var(--primary);
+            text-shadow: 0 0 20px rgba(0, 255, 157, 0.5);
+            margin-bottom: 1rem;
+            letter-spacing: 3px;
+        }
+
+        .hero p {
+            font-size: 1.5rem;
+            color: var(--light);
+            opacity: 0.8;
+            margin-bottom: 2rem;
+        }
+
+        .section {
+            padding: 6rem 2rem;
+            position: relative;
+        }
+
+        .section-title {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 2.5rem;
+            color: var(--primary);
+            text-align: center;
+            margin-bottom: 3rem;
+            position: relative;
+        }
+
+        .section-title::after {
+            content: '';
+            position: absolute;
+            bottom: -10px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 100px;
+            height: 3px;
+            background: var(--primary);
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .feature-card {
+            background: rgba(10, 25, 47, 0.8);
+            padding: 2rem;
+            border-radius: 15px;
+            border: 1px solid rgba(0, 255, 157, 0.1);
+            transition: all 0.3s ease;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 0 30px rgba(0, 255, 157, 0.2);
+        }
+
+        .feature-icon {
+            font-size: 2rem;
+            color: var(--primary);
+            margin-bottom: 1rem;
+        }
+
+        .feature-title {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 1.5rem;
+            color: var(--light);
+            margin-bottom: 1rem;
+        }
+
+        .compiler-section {
+            background: rgba(10, 25, 47, 0.8);
+            padding: 4rem 2rem;
+            border-radius: 20px;
+            margin: 0 auto;
+            max-width: 1400px;
+        }
+
+        .compiler-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+        }
+
+        .editor-container, .output-container {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 2rem;
+            border-radius: 15px;
+            border: 1px solid rgba(0, 255, 157, 0.1);
+        }
+
+        .CodeMirror {
+            height: 500px;
+            border: none;
+            font-size: 14px;
+            background: rgba(0, 0, 0, 0.3) !important;
+            border-radius: 10px;
+        }
+
+        .output {
+            height: 500px;
+            overflow-y: auto;
+            background: rgba(0, 0, 0, 0.3);
+            color: var(--light);
+            padding: 1rem;
+            font-family: 'Roboto Mono', monospace;
+            white-space: pre-wrap;
+            border-radius: 10px;
+        }
+
+        .button-container {
+            margin-top: 1.5rem;
+            display: flex;
+            gap: 1rem;
+        }
+
+        .button {
+            padding: 0.8rem 1.5rem;
+            border: none;
+            border-radius: 8px;
+            font-family: 'Orbitron', sans-serif;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .run-button {
+            background: var(--primary);
+            color: var(--dark);
+        }
+
+        .config-button {
+            background: var(--secondary);
+            color: var(--dark);
+        }
+
+        .about-section {
+            max-width: 800px;
+            margin: 0 auto;
+            text-align: center;
+        }
+
+        .about-content {
+            background: rgba(10, 25, 47, 0.8);
+            padding: 3rem;
+            border-radius: 20px;
+            border: 1px solid rgba(0, 255, 157, 0.1);
+        }
+
+        .about-image {
+            width: 200px;
+            height: 200px;
+            border-radius: 50%;
+            margin: 0 auto 2rem;
+            border: 3px solid var(--primary);
+            overflow: hidden;
+        }
+
+        .about-image img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .guide-section {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .guide-card {
+            background: rgba(10, 25, 47, 0.8);
+            padding: 2rem;
+            border-radius: 15px;
+            margin-bottom: 2rem;
+            border: 1px solid rgba(0, 255, 157, 0.1);
+        }
+
+        .guide-title {
+            font-family: 'Orbitron', sans-serif;
+            color: var(--primary);
+            margin-bottom: 1rem;
+        }
+
+        .footer {
+            background: rgba(10, 25, 47, 0.8);
+            padding: 2rem;
+            text-align: center;
+            border-top: 1px solid rgba(0, 255, 157, 0.1);
+        }
+
+        .social-links {
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .social-link {
+            color: var(--light);
+            font-size: 1.5rem;
+            transition: color 0.3s ease;
+        }
+
+        .social-link:hover {
+            color: var(--primary);
+        }
+
+        @media (max-width: 768px) {
+            .compiler-container {
+                grid-template-columns: 1fr;
+            }
+            
+            .hero h1 {
+                font-size: 2.5rem;
+            }
+            
+            .nav-links {
+                display: none;
+            }
+        }
+
+        .ai-features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .ai-feature-card {
+            background: rgba(10, 25, 47, 0.8);
+            padding: 2rem;
+            border-radius: 15px;
+            border: 1px solid rgba(0, 255, 157, 0.1);
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .ai-feature-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(45deg, transparent, rgba(0, 255, 157, 0.1));
+            z-index: 1;
+        }
+
+        .ai-feature-card:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 0 30px rgba(0, 255, 157, 0.2);
+        }
+
+        .ai-feature-icon {
+            font-size: 2.5rem;
+            color: var(--primary);
+            margin-bottom: 1rem;
+            position: relative;
+            z-index: 2;
+        }
+
+        .ai-feature-title {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 1.5rem;
+            color: var(--light);
+            margin-bottom: 1rem;
+            position: relative;
+            z-index: 2;
+        }
+
+        .ai-feature-description {
+            position: relative;
+            z-index: 2;
+        }
+
+        .analysis-panel {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 1.5rem;
+            border-radius: 10px;
+            margin-top: 1rem;
+            border: 1px solid rgba(0, 255, 157, 0.1);
+        }
+
+        .analysis-title {
+            font-family: 'Orbitron', sans-serif;
+            color: var(--primary);
+            margin-bottom: 0.5rem;
+        }
+
+        .analysis-content {
+            font-family: 'Roboto Mono', monospace;
+            font-size: 0.9rem;
+            color: var(--light);
+            opacity: 0.8;
+        }
+
+        .suggestion-panel {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 1rem;
+            border-radius: 10px;
+            margin-top: 1rem;
+            border-left: 3px solid var(--primary);
+        }
+
+        .suggestion-title {
+            color: var(--primary);
+            font-size: 0.9rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .suggestion-content {
+            font-size: 0.9rem;
+            color: var(--light);
+        }
+
+        .performance-metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .metric-card {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 1rem;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .metric-value {
+            font-family: 'Orbitron', sans-serif;
+            color: var(--primary);
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .metric-label {
+            font-size: 0.8rem;
+            color: var(--light);
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <div class="background"></div>
+    <div class="grid"></div>
+
+    <nav class="navbar">
+        <div class="logo">
+            <h2 style="color: var(--primary); font-family: 'Orbitron', sans-serif;">AI Compiler</h2>
+        </div>
+        <div class="nav-links">
+            <a href="#features" class="nav-link">Features</a>
+            <a href="#compiler" class="nav-link">Compiler</a>
+            <a href="#guide" class="nav-link">Guide</a>
+            <a href="#about" class="nav-link">About</a>
+        </div>
+    </nav>
+
+    <section class="hero">
+        <div class="hero-content">
+            <h1>AI Compiler</h1>
+            <p>Next Generation C Compiler with Advanced Features</p>
+            <div class="button-container">
+                <button class="button run-button" onclick="document.getElementById('compiler').scrollIntoView()">Try Now</button>
+                <button class="button config-button" onclick="document.getElementById('guide').scrollIntoView()">Learn More</button>
+            </div>
+        </div>
+    </section>
+
+    <section id="features" class="section">
+        <h2 class="section-title">Features</h2>
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon">⚡</div>
+                <h3 class="feature-title">Advanced Optimization</h3>
+                <p>Multiple optimization levels for maximum performance</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🔧</div>
+                <h3 class="feature-title">Cross-Platform</h3>
+                <p>Support for multiple architectures and operating systems</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🚀</div>
+                <h3 class="feature-title">Modern Features</h3>
+                <p>Support for modern C features and standards</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🔌</div>
+                <h3 class="feature-title">Plugin System</h3>
+                <p>Extensible architecture with plugin support</p>
+            </div>
+        </div>
+    </section>
+
+    <section id="ai-features" class="section">
+        <h2 class="section-title">AI-Powered Features</h2>
+        <div class="ai-features-grid">
+            <div class="ai-feature-card">
+                <div class="ai-feature-icon">🤖</div>
+                <h3 class="ai-feature-title">Intelligent Code Analysis</h3>
+                <p class="ai-feature-description">Real-time analysis of your code using advanced AI algorithms to detect potential issues and suggest optimizations.</p>
+                <div class="analysis-panel">
+                    <h4 class="analysis-title">Code Analysis</h4>
+                    <div class="analysis-content">
+                        <p>• Memory usage optimization</p>
+                        <p>• Performance bottlenecks detection</p>
+                        <p>• Security vulnerability scanning</p>
+                    </div>
+                </div>
+            </div>
+            <div class="ai-feature-card">
+                <div class="ai-feature-icon">🧠</div>
+                <h3 class="ai-feature-title">Smart Code Completion</h3>
+                <p class="ai-feature-description">Context-aware code suggestions powered by machine learning models trained on millions of code samples.</p>
+                <div class="suggestion-panel">
+                    <h4 class="suggestion-title">Suggestions</h4>
+                    <p class="suggestion-content">• Intelligent function completion</p>
+                    <p class="suggestion-content">• Variable name suggestions</p>
+                    <p class="suggestion-content">• Error prevention</p>
+                </div>
+            </div>
+            <div class="ai-feature-card">
+                <div class="ai-feature-icon">⚡</div>
+                <h3 class="ai-feature-title">Adaptive Optimization</h3>
+                <p class="ai-feature-description">AI-driven optimization that learns from your code patterns to provide the best possible performance.</p>
+                <div class="performance-metrics">
+                    <div class="metric-card">
+                        <div class="metric-value">98%</div>
+                        <div class="metric-label">Optimization Success</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">2.5x</div>
+                        <div class="metric-label">Performance Boost</div>
+                    </div>
+                </div>
+            </div>
+            <div class="ai-feature-card">
+                <div class="ai-feature-icon">🔍</div>
+                <h3 class="ai-feature-title">Pattern Recognition</h3>
+                <p class="ai-feature-description">Advanced pattern matching to identify common coding patterns and suggest improvements.</p>
+                <div class="analysis-panel">
+                    <h4 class="analysis-title">Pattern Analysis</h4>
+                    <div class="analysis-content">
+                        <p>• Code style consistency</p>
+                        <p>• Best practices enforcement</p>
+                        <p>• Anti-pattern detection</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="compiler" class="section">
+        <h2 class="section-title">AI-Powered Compiler</h2>
+        <div class="compiler-section">
+            <div class="compiler-container">
+                <div class="editor-container">
+                    <textarea id="code-editor">// Write your C code here
+#include <stdio.h>
+
+int main() {
+    printf("Hello, World!\n");
+    return 0;
+}</textarea>
+                    <div class="button-container">
+                        <button class="button run-button" onclick="compileCode()">Run</button>
+                        <button class="button config-button" onclick="toggleConfig()">Configure</button>
+                        <button class="button" style="background: var(--accent);" onclick="analyzeCode()">Analyze</button>
+                    </div>
+                    <div class="config-panel" id="config-panel">
+                        <div class="config-option">
+                            <label for="optimization">Optimization Level</label>
+                            <select id="optimization">
+                                <option value="0">None</option>
+                                <option value="1">Basic</option>
+                                <option value="2">Advanced</option>
+                                <option value="3">Maximum</option>
+                                <option value="4">AI-Optimized</option>
+                            </select>
+                        </div>
+                        <div class="config-option">
+                            <label for="target-arch">Target Architecture</label>
+                            <select id="target-arch">
+                                <option value="x86_64">x86_64</option>
+                                <option value="arm64">ARM64</option>
+                                <option value="riscv64">RISC-V64</option>
+                                <option value="auto">AI-Detected</option>
+                            </select>
+                        </div>
+                        <div class="config-option">
+                            <label for="target-os">Target OS</label>
+                            <select id="target-os">
+                                <option value="windows">Windows</option>
+                                <option value="linux">Linux</option>
+                                <option value="macos">macOS</option>
+                                <option value="auto">AI-Detected</option>
+                            </select>
+                        </div>
+                        <div class="config-option">
+                            <label for="ai-mode">AI Mode</label>
+                            <select id="ai-mode">
+                                <option value="basic">Basic</option>
+                                <option value="advanced">Advanced</option>
+                                <option value="expert">Expert</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="output-container">
+                    <div class="output" id="output"></div>
+                    <div class="analysis-panel" id="analysis-output" style="display: none;">
+                        <h4 class="analysis-title">AI Analysis Results</h4>
+                        <div class="analysis-content" id="analysis-content"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="guide" class="section">
+        <h2 class="section-title">Getting Started</h2>
+        <div class="guide-section">
+            <div class="guide-card">
+                <h3 class="guide-title">1. Write Your Code</h3>
+                <p>Use our modern editor to write your C code. The editor supports syntax highlighting, auto-completion, and more.</p>
+            </div>
+            <div class="guide-card">
+                <h3 class="guide-title">2. Configure Compiler</h3>
+                <p>Choose your optimization level, target architecture, and operating system for the best results.</p>
+            </div>
+            <div class="guide-card">
+                <h3 class="guide-title">3. Compile and Run</h3>
+                <p>Click the Run button to compile and execute your code. See the results in real-time.</p>
+            </div>
+        </div>
+    </section>
+
+    <section id="about" class="section">
+        <h2 class="section-title">About Me</h2>
+        <div class="about-section">
+            <div class="about-content">
+                <div class="about-image">
+                    <!-- Add your image here -->
+                    <img src="https://via.placeholder.com/200" alt="Dinesh H Suthar">
+                </div>
+                <h3>Dinesh H Suthar</h3>
+                <p>Creator of AI Compiler</p>
+                <p>I built this compiler to provide a modern, efficient, and user-friendly way to compile C code. With features like advanced optimization, cross-platform support, and a plugin system, it's designed to be the next generation of C compilers.</p>
+                <div class="social-links">
+                    <a href="#" class="social-link">GitHub</a>
+                    <a href="#" class="social-link">LinkedIn</a>
+                    <a href="#" class="social-link">Twitter</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <footer class="footer">
+        <p>© 2024 AI Compiler by Dinesh H Suthar. All rights reserved.</p>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/clike/clike.min.js"></script>
+    <script>
+        // Initialize CodeMirror
+        var editor = CodeMirror.fromTextArea(document.getElementById("code-editor"), {
+            mode: "text/x-c",
+            theme: "monokai",
+            lineNumbers: true,
+            autoCloseBrackets: true,
+            matchBrackets: true,
+            indentUnit: 4
+        });
+
+        function toggleConfig() {
+            const configPanel = document.getElementById("config-panel");
+            configPanel.classList.toggle("active");
+        }
+
+        function getConfig() {
+            return {
+                optimization_level: parseInt(document.getElementById("optimization").value),
+                target_arch: document.getElementById("target-arch").value,
+                target_os: document.getElementById("target-os").value
+            };
+        }
+
+        function compileCode() {
+            const code = editor.getValue();
+            const outputDiv = document.getElementById("output");
+            const config = getConfig();
+            
+            outputDiv.innerHTML = '<div class="success">Compiling...</div>';
+            
+            fetch('/compile', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ 
+                    code: code,
+                    config: config
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    outputDiv.innerHTML = `<div class="success">Compilation successful!</div><pre>${data.result}</pre>`;
+                } else {
+                    outputDiv.innerHTML = `<div class="error">Error: ${data.error}</div>`;
+                }
+            })
+            .catch(error => {
+                outputDiv.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+            });
+        }
+
+        function analyzeCode() {
+            const code = editor.getValue();
+            const analysisOutput = document.getElementById("analysis-output");
+            const analysisContent = document.getElementById("analysis-content");
+            
+            analysisOutput.style.display = "block";
+            analysisContent.innerHTML = '<div class="success">Analyzing code...</div>';
+            
+            fetch('/analyze', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ 
+                    code: code,
+                    config: getConfig()
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    let analysisHTML = '<div class="success">Analysis complete!</div>';
+                    analysisHTML += '<div class="performance-metrics">';
+                    analysisHTML += `<div class="metric-card">
+                        <div class="metric-value">${data.metrics.optimization}%</div>
+                        <div class="metric-label">Optimization Potential</div>
+                    </div>`;
+                    analysisHTML += `<div class="metric-card">
+                        <div class="metric-value">${data.metrics.complexity}</div>
+                        <div class="metric-label">Code Complexity</div>
+                    </div>`;
+                    analysisHTML += '</div>';
+                    
+                    analysisHTML += '<div class="suggestion-panel">';
+                    analysisHTML += '<h4 class="suggestion-title">Suggestions</h4>';
+                    data.suggestions.forEach(suggestion => {
+                        analysisHTML += `<p class="suggestion-content">• ${suggestion}</p>`;
+                    });
+                    analysisHTML += '</div>';
+                    
+                    analysisContent.innerHTML = analysisHTML;
+                } else {
+                    analysisContent.innerHTML = `<div class="error">Error: ${data.error}</div>`;
+                }
+            })
+            .catch(error => {
+                analysisContent.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+            });
+        }
+    </script>
+</body>
+</html> 

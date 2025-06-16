@@ -1,0 +1,70 @@
+# AI Compiler Configuration
+
+# Core Settings
+core:
+  version: "1.0.0"
+  debug: false
+  logging:
+    level: "INFO"
+    format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    file: "compiler.log"
+
+# Compilation Settings
+compilation:
+  optimization_level: 3  # 0-4 (None to AI-Optimized)
+  target_arch: "x86_64"  # x86_64, arm64, riscv64, auto
+  target_os: "windows"   # windows, linux, macos
+  include_paths:
+    - "./include"
+    - "/usr/local/include"
+  macros:
+    DEBUG: "1"
+    VERSION: "1.0.0"
+
+# AI Features
+ai:
+  enabled: true
+  model: "gpt-4"  # gpt-4, gpt-3.5-turbo
+  features:
+    code_completion: true
+    code_analysis: true
+    optimization: true
+    pattern_recognition: true
+  analysis:
+    complexity_threshold: 10
+    performance_metrics: true
+    security_checks: true
+  optimization:
+    level: "aggressive"  # conservative, moderate, aggressive
+    target: "performance"  # performance, size, balanced
+
+# Plugin System
+plugins:
+  enabled:
+    - "preprocessor"
+    - "parser"
+    - "ast"
+    - "ir_generator"
+    - "optimizer"
+    - "code_analyzer"
+  disabled: []
+  custom_paths: []
+
+# Web Interface
+web:
+  host: "0.0.0.0"
+  port: 5000
+  debug: false
+  secret_key: "your-secret-key-here"
+  allowed_origins:
+    - "http://localhost:3000"
+    - "http://localhost:5000"
+
+# Chatbot Settings
+chatbot:
+  enabled: true
+  model: "gpt-4"
+  system_prompt: "You are an AI programming assistant for the AI Compiler. Help users with code compilation, optimization, and debugging."
+  max_tokens: 1000
+  temperature: 0.7
+  max_history: 10 

@@ -1,0 +1,3 @@
+[console_scripts]
+c2llvm = compiler.main:main
+
