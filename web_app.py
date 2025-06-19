@@ -380,9 +380,8 @@ def compile_code():
             'code_length': len(code),
             'config': config
         }
-        
-        # Compile the code
-        result = compiler.compile(code, execute=True)
+          # Compile and execute the code
+        compilation_result = compiler.compile_and_execute(code)
         
         # Calculate compilation time
         compile_time = time.time() - start_time
@@ -398,7 +397,7 @@ def compile_code():
             'timestamp': datetime.now().isoformat(),
             'code_length': len(code),
             'compile_time': compile_time,
-            'success': True,
+            'success': compilation_result['success'],
             'config': config
         }
         compilation_history.append(compilation_entry)
@@ -411,12 +410,23 @@ def compile_code():
         if session_id in active_sessions:
             del active_sessions[session_id]
         
-        return jsonify({
-            'success': True, 
-            'result': result,
-            'compile_time': compile_time,
-            'session_id': session_id
-        })
+        if compilation_result['success']:
+            return jsonify({
+                'success': True, 
+                'result': compilation_result['output'],  # Return actual program output
+                'compile_time': compile_time,
+                'session_id': session_id,
+                'message': compilation_result['message'],
+                'ir_code': compilation_result.get('ir_code', ''),  # Include IR for advanced users
+                'source_lines': compilation_result.get('source_lines', 0)
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': compilation_result['error'],
+                'message': compilation_result['message'],
+                'session_id': session_id
+            })
         
     except Exception as e:
         logger.error(f"Compilation error: {str(e)}")
