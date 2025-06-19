@@ -111,8 +111,7 @@ class ASTBuilder(CListener):
                 param.name = direct_decl.Identifier().getText()
             # Detect pointer in declarator (e.g., int *a)
             if '*' in ctx.declarator().getText():
-                param.type.is_pointer = True
-        
+                param.type.is_pointer = True        
         if isinstance(self.current_node, FunctionDecl):
             self.current_node.parameters.append(param)
     
@@ -143,7 +142,12 @@ class ASTBuilder(CListener):
         type_name = 'int'  # Default to int
         for child in ctx.declarationSpecifiers().getChildren():
             if isinstance(child, AntlrCParser.TypeSpecifierContext):
-                type_name = child.getText()
+                type_spec_text = child.getText()
+                # Handle struct declarations
+                if type_spec_text.startswith('struct'):
+                    type_name = type_spec_text  # e.g., "structPoint" or "struct Point"
+                else:
+                    type_name = type_spec_text
                 break
         
         # Process each declarator
@@ -256,11 +260,28 @@ class ASTBuilder(CListener):
                 self.expr_stack[-1].append(identifier)
                 print(f"Current expression stack: {self.expr_stack}")
         elif ctx.Constant():
-            # Handle constant
-            value = int(ctx.Constant().getText())
-            print(f"Found constant: {value}")
-            # Create an IntegerLiteral instead of a Literal
-            literal = IntegerLiteral(value=value)
+            # Handle constant (both integers and floating-point)
+            constant_text = ctx.Constant().getText()
+            print(f"Found constant: {constant_text}")
+              # Try to determine if it's a float or int
+            if '.' in constant_text or 'e' in constant_text.lower() or 'f' in constant_text.lower():
+                # It's a floating-point number
+                value = float(constant_text.rstrip('fF'))  # Remove 'f' or 'F' suffix if present
+                
+                # Determine precision based on suffix
+                if constant_text.lower().endswith('f'):
+                    # Single precision float
+                    print(f"Creating FloatLiteral for: {constant_text}")
+                    literal = FloatLiteral(value=value)
+                else:
+                    # Default to double precision for literals without 'f' suffix
+                    print(f"Creating DoubleLiteral for: {constant_text}")
+                    literal = DoubleLiteral(value=value)
+            else:
+                # It's an integer
+                value = int(constant_text)
+                literal = IntegerLiteral(value=value)
+            
             print(f"Added literal to stack: {literal}")
             if self.expr_stack:
                 self.expr_stack[-1].append(literal)
@@ -365,26 +386,51 @@ class ASTBuilder(CListener):
     
     def exitPostfixExpression(self, ctx):
         """Exit a parse tree produced by CParser.postfixExpression."""
-        if len(ctx.children) > 1 and ctx.children[1].getText() == '(':  # This is a function call
-            exprs = []
-            while self.expr_stack[-1]:
-                exprs.insert(0, self.expr_stack[-1].pop())
-            if exprs:
-                func = exprs[0]
-                args = []
-                if len(exprs) > 1:
-                    args.extend(exprs[1:])
-                # Only warn and skip for malloc/free, not for user functions like swap
-                if isinstance(func, Identifier) and func.name in ("malloc", "free"):
-                    self.warn(f"Function '{func.name}' is not fully supported yet. Skipping call.")
-                    return
-                # For all other functions, including swap, create the FunctionCall node
-                func_call = FunctionCall(function=func, arguments=args)
-                print(f"Created function call: {func_call}")
-                if len(self.expr_stack) > 1:
-                    self.expr_stack[-2].append(func_call)
-                else:
-                    self.expr_stack[-1].append(func_call)
+        if len(ctx.children) > 1:
+            op = ctx.children[1].getText()
+            
+            if op == '(':  # This is a function call
+                exprs = []
+                while self.expr_stack[-1]:
+                    exprs.insert(0, self.expr_stack[-1].pop())
+                if exprs:
+                    func = exprs[0]
+                    args = []
+                    if len(exprs) > 1:
+                        args.extend(exprs[1:])
+                    # Only warn and skip for malloc/free, not for user functions like swap
+                    if isinstance(func, Identifier) and func.name in ("malloc", "free"):
+                        self.warn(f"Function '{func.name}' is not fully supported yet. Skipping call.")
+                        return
+                    # For all other functions, including swap, create the FunctionCall node
+                    func_call = FunctionCall(function=func, arguments=args)
+                    print(f"Created function call: {func_call}")
+                    if len(self.expr_stack) > 1:
+                        self.expr_stack[-2].append(func_call)
+                    else:
+                        self.expr_stack[-1].append(func_call)
+            
+            elif op == '.' or op == '->':  # Member access
+                if len(ctx.children) >= 3:  # object, '.', member
+                    exprs = []
+                    while self.expr_stack[-1]:
+                        exprs.insert(0, self.expr_stack[-1].pop())
+                    
+                    if exprs:
+                        object_expr = exprs[0]  # The object (e.g., 'p')
+                        member_name = ctx.children[2].getText()  # The member (e.g., 'x')
+                          # Create member access node
+                        member_access = MemberAccess(
+                            base=object_expr,
+                            member=member_name
+                        )
+                        print(f"Created member access: {member_access}")
+                        
+                        if len(self.expr_stack) > 1:
+                            self.expr_stack[-2].append(member_access)
+                        else:
+                            self.expr_stack[-1].append(member_access)
+                    
         elif self.expr_stack[-1]:
             expr = self.expr_stack[-1].pop()
             if len(self.expr_stack) > 1:

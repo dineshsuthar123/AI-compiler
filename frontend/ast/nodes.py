@@ -119,6 +119,17 @@ class FloatLiteral(Literal):
             raise TypeError(f"FloatLiteral value must be a float, got {type(self.value)}")
 
 @dataclass
+class DoubleLiteral(Literal):
+    """Represents a double-precision floating-point literal."""
+    value: float
+
+    def _validate(self):
+        super()._validate()
+        self.logger.debug(f"Validating DoubleLiteral node: {self.value}")
+        if not isinstance(self.value, float):
+            raise TypeError(f"DoubleLiteral value must be a float, got {type(self.value)}")
+
+@dataclass
 class StringLiteral(Literal):
     """Represents a string literal."""
     value: str

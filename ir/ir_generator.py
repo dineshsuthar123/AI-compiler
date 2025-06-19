@@ -171,7 +171,7 @@ class IRGenerator:
         elif node.op == '>=':
             return self.builder.icmp_signed('>=', left, right)
         elif node.op == '=':
-            # Assignment: handle pointer and variable assignment
+            # Assignment: handle pointer, variable, and member access assignment
             if isinstance(node.left, UnaryOp) and node.left.op == '*':
                 ptr = self.visit(node.left.operand)
                 self.builder.store(right, ptr)
@@ -190,8 +190,35 @@ class IRGenerator:
                 else:
                     self.builder.store(right, ptr)
                 return right
+            elif hasattr(node.left, '__class__') and node.left.__class__.__name__ == 'MemberAccess':
+                # Handle member access assignment (e.g., p.x = 3.0)
+                member_var_name = f"{node.left.base.name}_{node.left.member}"
+                
+                # Create or get the member variable
+                if member_var_name not in self.symbol_table:
+                    # Infer type from the right-hand side
+                    if hasattr(right, 'type'):
+                        var_type = right.type
+                    else:
+                        var_type = ir.DoubleType()  # Default to double
+                    ptr = self.builder.alloca(var_type, name=member_var_name)
+                    self.symbol_table[member_var_name] = ptr
+                else:
+                    ptr = self.symbol_table[member_var_name]
+                
+                # Perform type conversion if needed
+                if hasattr(right, 'type') and hasattr(ptr.type.pointee, '__class__'):
+                    if ptr.type.pointee != right.type:
+                        # Convert between float/double types
+                        if isinstance(ptr.type.pointee, ir.DoubleType) and isinstance(right.type, ir.FloatType):
+                            right = self.builder.fpext(right, ir.DoubleType())
+                        elif isinstance(ptr.type.pointee, ir.FloatType) and isinstance(right.type, ir.DoubleType):
+                            right = self.builder.fptrunc(right, ir.FloatType())
+                
+                self.builder.store(right, ptr)
+                return right
             else:
-                raise ValueError("Left side of assignment must be a variable identifier or pointer dereference")
+                raise ValueError("Left side of assignment must be a variable identifier, member access, or pointer dereference")
         else:
             raise ValueError(f"Unknown binary operator: {node.op}")
     
@@ -325,8 +352,7 @@ class IRGenerator:
         if node.increment:
             self.visit(node.increment)
         self.builder.branch(cond_block)
-        # End
-        self.builder.position_at_end(end_block)
+        # End        self.builder.position_at_end(end_block)
     
     def visit_VariableDecl(self, node: VariableDecl) -> ir.Value:
         """Generate IR for a variable declaration."""
@@ -339,6 +365,22 @@ class IRGenerator:
         # Initialize if there's an initializer
         if node.init:
             init_val = self.visit(node.init)
+            
+            # Handle type conversions for assignments
+            if var_type != init_val.type:
+                # Handle float to double promotion
+                if isinstance(var_type, ir.DoubleType) and isinstance(init_val.type, ir.FloatType):
+                    init_val = self.builder.fpext(init_val, var_type)
+                # Handle double to float demotion
+                elif isinstance(var_type, ir.FloatType) and isinstance(init_val.type, ir.DoubleType):
+                    init_val = self.builder.fptrunc(init_val, var_type)
+                # Handle integer to float conversion
+                elif isinstance(var_type, (ir.FloatType, ir.DoubleType)) and isinstance(init_val.type, ir.IntType):
+                    init_val = self.builder.sitofp(init_val, var_type)
+                # Handle float to integer conversion
+                elif isinstance(init_val.type, (ir.FloatType, ir.DoubleType)) and isinstance(var_type, ir.IntType):
+                    init_val = self.builder.fptosi(init_val, var_type)
+            
             self.builder.store(init_val, ptr)
             
         return ptr
@@ -430,6 +472,18 @@ class IRGenerator:
             raise TypeError(f"Expected IntegerLiteral, got {type(node)}")
         return ir.Constant(ir.IntType(32), node.value)
     
+    def visit_FloatLiteral(self, node) -> ir.Constant:
+        """Generate IR for a floating-point literal."""
+        self.logger.debug(f"Visiting float literal: {node.value}")
+        if not hasattr(node, 'value'):
+            raise TypeError(f"Expected FloatLiteral with value, got {type(node)}")
+        return ir.Constant(ir.FloatType(), float(node.value))
+    
+    def visit_DoubleLiteral(self, node) -> ir.Constant:
+        """Generate IR for a double-precision floating-point literal."""
+        self.logger.debug(f"Visiting double literal: {node.value}")
+        return ir.Constant(ir.DoubleType(), float(node.value))
+    
     def visit_ExpressionStmt(self, node: ExpressionStmt) -> None:
         """Generate IR for an expression statement."""
         self.logger.debug("Visiting expression statement")
@@ -464,14 +518,64 @@ class IRGenerator:
             String containing LLVM IR code
         """
         return str(self.module)
+    
+    def visit_Constant(self, node) -> ir.Constant:
+        """Generate IR for a constant (supports int, float, char, string)."""
+        self.logger.debug(f"Visiting constant: {node.value} (type: {node.type})")
+        
+        if node.type == 'int':
+            return ir.Constant(ir.IntType(32), int(node.value))        elif node.type == 'float':
+            return ir.Constant(ir.FloatType(), float(node.value))
+        elif node.type == 'double':
+            return ir.Constant(ir.DoubleType(), float(node.value))
+        elif node.type == 'char':
+            # Handle character constants
+            if isinstance(node.value, str) and len(node.value) == 1:
+                return ir.Constant(ir.IntType(8), ord(node.value))
+            else:
+                return ir.Constant(ir.IntType(8), int(node.value))
+        elif node.type == 'string':
+            # Handle string constants - delegate to StringLiteral logic
+            return self._create_string_constant(str(node.value))
+        else:
+            # Default to integer
+            return ir.Constant(ir.IntType(32), int(node.value))
+    
+    def visit_MemberAccess(self, node) -> ir.Value:
+        """Generate IR for member access (simplified implementation)."""
+        self.logger.debug(f"Visiting member access: {node.base}.{node.member}")
+        
+        # For now, treat member access as a simple variable lookup
+        # This is a simplified approach - in a full implementation, you'd need to:
+        # 1. Get the struct type information
+        # 2. Calculate the offset of the member within the struct
+        # 3. Generate GEP (GetElementPtr) instructions
+        
+        # Simple approach: concatenate object and member names
+        member_var_name = f"{node.base.name}_{node.member}"
+        
+        # Check if this "flattened" variable exists
+        if member_var_name in self.symbol_table:
+            ptr = self.symbol_table[member_var_name]
+            return self.builder.load(ptr)
+        else:
+            # Create the variable if it doesn't exist (for assignments)
+            # Try to infer type from context - default to double for now
+            var_type = ir.DoubleType()
+            ptr = self.builder.alloca(var_type, name=member_var_name)
+            self.symbol_table[member_var_name] = ptr
+            
+            # Initialize with zero
+            zero = ir.Constant(var_type, 0.0)
+            self.builder.store(zero, ptr)
+            return self.builder.load(ptr)
 
 # === STRUCT SUPPORT STUBS ===
 # TODO: Map StructDecl to LLVM struct types
 # TODO: Generate IR for struct allocation, member access, and assignment
 # def visit_StructDecl(self, node: StructDecl):
 #     ...
-# def visit_MemberAccess(self, node: MemberAccess):
-#     ...
+
 # === END STRUCT SUPPORT STUBS ===
 
 # === TODO: FULL C IR GENERATION STUBS ===
