@@ -19,6 +19,7 @@ from pathlib import Path
 
 app = Flask(__name__)
 compiler = ModernCompiler()
+start_time = time.time()  # Track application start time
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -89,8 +90,24 @@ def get_system_info():
 
 @app.route('/api/real-time-stats')
 def get_real_time_stats():
-    """Get real-time compilation statistics"""
-    return jsonify(real_time_stats)
+    """Get real-time compilation statistics and system metrics"""
+    try:
+        system_stats = {
+            'cpu_percent': psutil.cpu_percent(),
+            'memory_percent': psutil.virtual_memory().percent,
+            'memory_used_gb': round(psutil.virtual_memory().used / (1024**3), 2),
+            'memory_total_gb': round(psutil.virtual_memory().total / (1024**3), 2),
+            'disk_percent': psutil.disk_usage('C:\\' if sys.platform == 'win32' else '/').percent,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        # Merge with compilation stats
+        combined_stats = {**real_time_stats, **system_stats}
+        return jsonify(combined_stats)
+        
+    except Exception as e:
+        logger.error(f"Real-time stats error: {e}")
+        return jsonify(real_time_stats)  # Fallback to basic stats
 
 @app.route('/api/code-analysis', methods=['POST'])
 def analyze_code():
@@ -336,3 +353,133 @@ def download_binary():
     except Exception as e:
         logger.error(f"Binary generation error: {e}")
         return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/compile', methods=['POST'])
+def compile_code():
+    """Main compilation endpoint with enhanced features"""
+    try:
+        data = request.json
+        code = data.get('code', '')
+        config = data.get('config', {})
+        session_id = data.get('session_id', str(uuid.uuid4()))
+        
+        if not code.strip():
+            return jsonify({'success': False, 'error': 'No code provided'})
+        
+        # Update compiler configuration
+        compiler.config.update(config)
+        
+        # Track compilation start
+        start_time = time.time()
+        real_time_stats['total_compilations'] = real_time_stats.get('total_compilations', 0) + 1
+        real_time_stats['active_sessions'] = real_time_stats.get('active_sessions', 0) + 1
+        
+        # Store session info
+        active_sessions[session_id] = {
+            'start_time': start_time,
+            'code_length': len(code),
+            'config': config
+        }
+        
+        # Compile the code
+        result = compiler.compile(code, execute=True)
+        
+        # Calculate compilation time
+        compile_time = time.time() - start_time
+        
+        # Update stats
+        real_time_stats['last_compile_time'] = compile_time
+        real_time_stats['average_compile_time'] = real_time_stats.get('average_compile_time', compile_time)
+        real_time_stats['active_sessions'] = real_time_stats.get('active_sessions', 1) - 1
+        
+        # Store in compilation history
+        compilation_entry = {
+            'id': session_id,
+            'timestamp': datetime.now().isoformat(),
+            'code_length': len(code),
+            'compile_time': compile_time,
+            'success': True,
+            'config': config
+        }
+        compilation_history.append(compilation_entry)
+        
+        # Keep only last 100 entries
+        if len(compilation_history) > 100:
+            compilation_history.pop(0)
+        
+        # Clean up session
+        if session_id in active_sessions:
+            del active_sessions[session_id]
+        
+        return jsonify({
+            'success': True, 
+            'result': result,
+            'compile_time': compile_time,
+            'session_id': session_id
+        })
+        
+    except Exception as e:
+        logger.error(f"Compilation error: {str(e)}")
+        
+        # Update error stats
+        real_time_stats['total_errors'] = real_time_stats.get('total_errors', 0) + 1
+        real_time_stats['active_sessions'] = real_time_stats.get('active_sessions', 1) - 1
+        
+        # Clean up session on error
+        if 'session_id' in locals() and session_id in active_sessions:
+            del active_sessions[session_id]
+        
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/compilation-history')
+def get_compilation_history():
+    """Get compilation history"""
+    return jsonify({
+        'success': True,
+        'history': compilation_history[-20:]  # Return last 20 entries
+    })
+
+@app.route('/api/active-sessions')
+def get_active_sessions():
+    """Get currently active compilation sessions"""
+    return jsonify({
+        'success': True,
+        'sessions': active_sessions,
+        'count': len(active_sessions)
+    })
+
+@app.route('/api/clear-history', methods=['POST'])
+def clear_history():
+    """Clear compilation history"""
+    global compilation_history
+    compilation_history = []
+    return jsonify({'success': True, 'message': 'History cleared'})
+
+@app.route('/api/health')
+def health_check():
+    """Health check endpoint"""
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': datetime.now().isoformat(),
+        'version': '1.0.0',
+        'uptime': time.time() - start_time if 'start_time' in globals() else 0
+    })
+
+if __name__ == '__main__':
+    # Start background monitoring
+    monitor_thread = threading.Thread(target=update_system_stats, daemon=True)
+    monitor_thread.start()
+    
+    print("🚀 Starting AI-Powered C Compiler Web Interface...")
+    print("📡 Server will be available at: http://localhost:5000")
+    print("🤖 AI features: Enabled")
+    print("⚡ Real-time monitoring: Active")
+    print("🎯 Ready to compile C code!")
+    
+    # Start Flask app
+    app.run(
+        host='0.0.0.0',
+        port=5000,
+        debug=True,
+        threaded=True
+    )
