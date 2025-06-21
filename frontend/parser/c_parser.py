@@ -1,7 +1,6 @@
 from typing import Any, Dict, List, Optional, Union
 import logging
 from antlr4 import *
-from antlr4.error.ErrorListener import ErrorListener
 from ..grammar.CParser import CParser as AntlrCParser
 from ..grammar.CLexer import CLexer
 from ..grammar.CListener import CListener
@@ -15,6 +14,7 @@ class ASTBuilder(CListener):
         self.current_node = None
         self.node_stack = []
         self.expr_stack = []
+        self.logger = logging.getLogger(__name__)
     
     def safe_pop(self, stack):
         if stack:
@@ -95,8 +95,7 @@ class ASTBuilder(CListener):
         """Enter a parse tree produced by CParser.parameterDeclaration."""
         param_type = Type(name='int')  # Default to int for now
         param = Parameter(name='', type=param_type)
-        
-        # Get type from declaration specifiers
+          # Get type from declaration specifiers
         for child in ctx.declarationSpecifiers().getChildren():
             if isinstance(child, AntlrCParser.TypeSpecifierContext):
                 type_name = child.getText().replace('*', '').strip()
@@ -117,6 +116,7 @@ class ASTBuilder(CListener):
     
     def enterCompoundStatement(self, ctx):
         """Enter a parse tree produced by CParser.compoundStatement."""
+        print("=== ENTERING COMPOUND STATEMENT ===")
         compound = CompoundStmt(statements=[])
         if isinstance(self.current_node, FunctionDecl):
             self.current_node.body = compound
@@ -131,31 +131,43 @@ class ASTBuilder(CListener):
                 self.current_node.else_branch = compound
         self.node_stack.append(self.current_node)
         self.current_node = compound
-    
+        print(f"Set current_node to CompoundStmt, node_stack length: {len(self.node_stack)}")    
     def exitCompoundStatement(self, ctx):
         """Exit a parse tree produced by CParser.compoundStatement."""
         self.current_node = self.safe_pop(self.node_stack)
     
     def enterDeclaration(self, ctx):
         """Enter a parse tree produced by CParser.declaration."""
+        print(f"=== ENTERING DECLARATION: {ctx.getText()} ===")
+        
         # Get type from declaration specifiers
         type_name = 'int'  # Default to int
         for child in ctx.declarationSpecifiers().getChildren():
             if isinstance(child, AntlrCParser.TypeSpecifierContext):
                 type_spec_text = child.getText()
+                print(f"Found type specifier: {type_spec_text}")
                 # Handle struct declarations
                 if type_spec_text.startswith('struct'):
                     type_name = type_spec_text  # e.g., "structPoint" or "struct Point"
                 else:
                     type_name = type_spec_text
-                break
+                break        
+        print(f"Determined type name: {type_name}")
+        
+        # Check if there's an initDeclaratorList
+        has_init_decl_list = ctx.initDeclaratorList() is not None
+        print(f"Has initDeclaratorList: {has_init_decl_list}")
+        if ctx.initDeclaratorList():
+            print(f"initDeclaratorList text: {ctx.initDeclaratorList().getText()}")
         
         # Process each declarator
         if ctx.initDeclaratorList():
+            print(f"Found initDeclaratorList with {len(ctx.initDeclaratorList().initDeclarator())} declarators")
             for init_decl in ctx.initDeclaratorList().initDeclarator():
                 decl = init_decl.declarator()
                 if decl and decl.directDeclarator() and decl.directDeclarator().Identifier():
                     var_name = decl.directDeclarator().Identifier().getText()
+                    print(f"Creating variable: {var_name} of type {type_name}")
                     var_decl = VariableDecl(
                         name=var_name,
                         type=Type(name=type_name),
@@ -169,6 +181,13 @@ class ASTBuilder(CListener):
                     
                     if isinstance(self.current_node, CompoundStmt):
                         self.current_node.statements.append(var_decl)
+                        print(f"Added variable declaration: {var_name} of type {type_name} to CompoundStmt")
+                    else:
+                        print(f"Current node is not CompoundStmt, it's: {type(self.current_node)}")
+        else:
+            # Handle declarations without initDeclaratorList (like pure struct declarations)
+            # This case is handled by struct parsing methods
+            print(f"Declaration without initDeclaratorList: {type_name}")
     
     def enterInitializer(self, ctx):
         """Enter a parse tree produced by CParser.initializer."""
@@ -683,9 +702,93 @@ class ASTBuilder(CListener):
             stmt = stmt[-1] if stmt and isinstance(stmt, list) and stmt else None
             if isinstance(self.current_node, CompoundStmt):
                 self.current_node.statements.append(stmt)
-        
-        # Restore the previous node if we're in an if statement branch
+          # Restore the previous node if we're in an if statement branch
         self.current_node = self.safe_pop(self.node_stack)
+    
+    def enterStructOrUnionSpecifier(self, ctx):
+        """Enter a parse tree produced by CParser.structOrUnionSpecifier."""
+        struct_name = None
+        if ctx.Identifier():
+            struct_name = ctx.Identifier().getText()
+        
+        # If this is a struct definition (has body)
+        if ctx.structDeclarationList():
+            # Initialize struct fields list
+            self.struct_fields = []
+            self.logger.debug(f"Starting struct definition: {struct_name}")
+        else:
+            # This is just a struct reference
+            self.logger.debug(f"Struct reference: {struct_name}")
+    
+    def exitStructOrUnionSpecifier(self, ctx):
+        """Exit a parse tree produced by CParser.structOrUnionSpecifier."""
+        struct_name = None
+        if ctx.Identifier():
+            struct_name = ctx.Identifier().getText()
+        
+        # If this was a struct definition, create StructDecl node
+        if ctx.structDeclarationList() and hasattr(self, 'struct_fields'):
+            struct_decl = StructDecl(
+                name=struct_name or f"anonymous_struct_{id(ctx)}",
+                fields=self.struct_fields
+            )
+            
+            # Add to current translation unit or compound statement
+            if isinstance(self.current_node, (TranslationUnit, CompoundStmt)):
+                if hasattr(self.current_node, 'statements'):
+                    self.current_node.statements.append(struct_decl)
+                else:
+                    self.current_node.declarations.append(struct_decl)
+            
+            # Clean up
+            delattr(self, 'struct_fields')
+            self.logger.debug(f"Created struct declaration: {struct_name}")
+    
+    def enterStructDeclaration(self, ctx):
+        """Enter a parse tree produced by CParser.structDeclaration."""
+        # Get type from specifier qualifier list
+        self.current_struct_type = 'int'  # Default
+        for child in ctx.specifierQualifierList().getChildren():
+            if hasattr(child, 'getText'):
+                text = child.getText()
+                if text in ['int', 'float', 'double', 'char', 'void']:
+                    self.current_struct_type = text
+                    break
+    
+    def enterStructDeclarator(self, ctx):
+        """Enter a parse tree produced by CParser.structDeclarator."""
+        if ctx.declarator() and ctx.declarator().directDeclarator():
+            direct_decl = ctx.declarator().directDeclarator()
+            if direct_decl.Identifier():
+                field_name = direct_decl.Identifier().getText()
+                field_decl = VariableDecl(
+                    name=field_name,
+                    type=Type(name=self.current_struct_type),
+                    init=None
+                )                
+                # Add to current struct fields
+                if hasattr(self, 'struct_fields'):
+                    self.struct_fields.append(field_decl)
+                    self.logger.debug(f"Added struct field: {field_name} of type {self.current_struct_type}")
+    
+    def enterBlockItem(self, ctx):
+        """Enter a parse tree produced by CParser.blockItem."""
+        print(f"=== ENTERING BLOCK ITEM: {ctx.getText()} ===")
+        # Block items can be declarations or statements
+        if ctx.declaration():
+            print(f"Block item is a DECLARATION: {ctx.declaration().getText()}")
+            # Manually trigger declaration processing
+            self.enterDeclaration(ctx.declaration())
+        elif ctx.statement():
+            print(f"Block item is a STATEMENT: {ctx.statement().getText()}")
+        else:
+            print(f"Block item is UNKNOWN type")
+        
+    def enterBlockItemList(self, ctx):
+        """Enter a parse tree produced by CParser.blockItemList."""
+        print(f"=== ENTERING BLOCK ITEM LIST ===")
+        if ctx.blockItem():
+            print(f"Found {len(ctx.blockItem())} block items")
 
 # === TODO: FULL C SUPPORT STUBS ===
 # TODO: Support for struct/union/enum/typedef parsing
@@ -742,10 +845,9 @@ class CParser:
     
     def _create_parser(self, token_stream: CommonTokenStream):
         """Create a C parser for the token stream."""
-        # TODO: Implement C parser creation
-        raise NotImplementedError
+        # TODO: Implement C parser creation        raise NotImplementedError
     
-    def _convert_to_ast(self, parse_tree) -> 'AST':
+    def _convert_to_ast(self, parse_tree):
         """Convert ANTLR parse tree to our AST representation."""
         # TODO: Implement parse tree to AST conversion
         raise NotImplementedError

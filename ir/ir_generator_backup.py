@@ -199,14 +199,8 @@ class IRGenerator:
                     # Infer type from the right-hand side
                     if hasattr(right, 'type'):
                         var_type = right.type
-                    elif isinstance(node.right, IntegerLiteral):
-                        var_type = ir.IntType(32)
-                    elif isinstance(node.right, FloatLiteral):
-                        var_type = ir.FloatType()
-                    elif isinstance(node.right, DoubleLiteral):
-                        var_type = ir.DoubleType()
                     else:
-                        var_type = ir.IntType(32)  # Default to int
+                        var_type = ir.DoubleType()  # Default to double
                     ptr = self.builder.alloca(var_type, name=member_var_name)
                     self.symbol_table[member_var_name] = ptr
                 else:
@@ -220,12 +214,6 @@ class IRGenerator:
                             right = self.builder.fpext(right, ir.DoubleType())
                         elif isinstance(ptr.type.pointee, ir.FloatType) and isinstance(right.type, ir.DoubleType):
                             right = self.builder.fptrunc(right, ir.FloatType())
-                        # Convert integer to float/double
-                        elif isinstance(ptr.type.pointee, (ir.FloatType, ir.DoubleType)) and isinstance(right.type, ir.IntType):
-                            right = self.builder.sitofp(right, ptr.type.pointee)
-                        # Convert float/double to integer
-                        elif isinstance(right.type, (ir.FloatType, ir.DoubleType)) and isinstance(ptr.type.pointee, ir.IntType):
-                            right = self.builder.fptosi(right, ptr.type.pointee)
                 
                 self.builder.store(right, ptr)
                 return right
@@ -619,7 +607,6 @@ class IRGenerator:
 # === STRUCT SUPPORT STUBS ===
 # TODO: Map StructDecl to LLVM struct types
 # TODO: Generate IR for struct allocation, member access, and assignment
-
     def visit_StructDecl(self, node):
         """Generate IR for struct declaration."""
         from frontend.ast.nodes import StructDecl
@@ -631,19 +618,19 @@ class IRGenerator:
         field_types = []
         for field in node.fields:
             if field.type.name == 'int':
-                field_types.append(ir.IntType(32))
+                field_types.append(self.context.int_type(32))
             elif field.type.name == 'float':
-                field_types.append(ir.FloatType())
+                field_types.append(self.context.float_type())
             elif field.type.name == 'double':
-                field_types.append(ir.DoubleType())
+                field_types.append(self.context.double_type())
             elif field.type.name == 'char':
-                field_types.append(ir.IntType(8))
+                field_types.append(self.context.int_type(8))
             else:
                 # Default to int for unknown types
-                field_types.append(ir.IntType(32))
+                field_types.append(self.context.int_type(32))
         
         # Create the struct type
-        struct_type = ir.LiteralStructType(field_types)
+        struct_type = self.context.struct_type(field_types, packed=False)
         
         # Store the struct type for later use
         if not hasattr(self, 'struct_types'):
