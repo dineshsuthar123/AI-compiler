@@ -522,9 +522,9 @@ class IRGenerator:
     def visit_Constant(self, node) -> ir.Constant:
         """Generate IR for a constant (supports int, float, char, string)."""
         self.logger.debug(f"Visiting constant: {node.value} (type: {node.type})")
-        
         if node.type == 'int':
-            return ir.Constant(ir.IntType(32), int(node.value))        elif node.type == 'float':
+            return ir.Constant(ir.IntType(32), int(node.value))
+        elif node.type == 'float':
             return ir.Constant(ir.FloatType(), float(node.value))
         elif node.type == 'double':
             return ir.Constant(ir.DoubleType(), float(node.value))
