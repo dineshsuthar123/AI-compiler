@@ -117,7 +117,6 @@ typeSpecifier
     | 'unsigned'
     | structOrUnionSpecifier
     | enumSpecifier
-    | typedefName
     ;
 
 structOrUnionSpecifier

@@ -141,8 +141,7 @@ class IRGenerator:
         if node.value:
             ret_val = self.visit(node.value)
             self.builder.ret(ret_val)
-        else:
-            self.builder.ret(ir.Constant(ir.IntType(32), 0))
+        else:            self.builder.ret(ir.Constant(ir.IntType(32), 0))
     
     def visit_BinaryOp(self, node: BinaryOp) -> ir.Value:
         """Generate IR for a binary operation."""
@@ -176,44 +175,13 @@ class IRGenerator:
                 ptr = self.visit(node.left.operand)
                 self.builder.store(right, ptr)
                 return right
-            elif isinstance(node.left, Identifier):
-                var_name = node.left.name
-                ptr = self.symbol_table[var_name]
-                # If the variable is a pointer, store pointer value directly
-                if isinstance(ptr.type.pointee, ir.PointerType):
-                    # If right is an identifier, get its pointer
-                    if isinstance(node.right, Identifier):
-                        right_ptr = self.visit(node.right, as_pointer=True)
-                        self.builder.store(right_ptr, ptr)
-                    else:
-                        self.builder.store(right, ptr)
-                else:
-                    self.builder.store(right, ptr)
-                return right
-            elif hasattr(node.left, '__class__') and node.left.__class__.__name__ == 'MemberAccess':
+            elif isinstance(node.left, MemberAccess):
                 # Handle member access assignment (e.g., p.x = 3.0)
-                member_var_name = f"{node.left.base.name}_{node.left.member}"
-                
-                # Create or get the member variable
-                if member_var_name not in self.symbol_table:
-                    # Infer type from the right-hand side
-                    if hasattr(right, 'type'):
-                        var_type = right.type
-                    elif isinstance(node.right, IntegerLiteral):
-                        var_type = ir.IntType(32)
-                    elif isinstance(node.right, FloatLiteral):
-                        var_type = ir.FloatType()
-                    elif isinstance(node.right, DoubleLiteral):
-                        var_type = ir.DoubleType()
-                    else:
-                        var_type = ir.IntType(32)  # Default to int
-                    ptr = self.builder.alloca(var_type, name=member_var_name)
-                    self.symbol_table[member_var_name] = ptr
-                else:
-                    ptr = self.symbol_table[member_var_name]
+                # Use the GEP pointer from visit_MemberAccess
+                ptr = self.visit(node.left, as_pointer=True)
                 
                 # Perform type conversion if needed
-                if hasattr(right, 'type') and hasattr(ptr.type.pointee, '__class__'):
+                if hasattr(right, 'type') and hasattr(ptr.type, 'pointee'):
                     if ptr.type.pointee != right.type:
                         # Convert between float/double types
                         if isinstance(ptr.type.pointee, ir.DoubleType) and isinstance(right.type, ir.FloatType):
@@ -228,6 +196,20 @@ class IRGenerator:
                             right = self.builder.fptosi(right, ptr.type.pointee)
                 
                 self.builder.store(right, ptr)
+                return right
+            elif isinstance(node.left, Identifier):
+                var_name = node.left.name
+                ptr = self.symbol_table[var_name]
+                # If the variable is a pointer, store pointer value directly
+                if isinstance(ptr.type.pointee, ir.PointerType):
+                    # If right is an identifier, get its pointer
+                    if isinstance(node.right, Identifier):
+                        right_ptr = self.visit(node.right, as_pointer=True)
+                        self.builder.store(right_ptr, ptr)
+                    else:
+                        self.builder.store(right, ptr)
+                else:
+                    self.builder.store(right, ptr)
                 return right
             else:
                 raise ValueError("Left side of assignment must be a variable identifier, member access, or pointer dereference")
@@ -506,7 +488,6 @@ class IRGenerator:
         self.logger.debug("Visiting expression statement")
         # Just visit the expression - its value will be discarded
         self.visit(node.expr)
-    
     def visit_Type(self, node: Type) -> ir.Type:
         """Visit a type node."""
         self.logger.debug(f"Visiting type: {node.name}")
@@ -522,8 +503,17 @@ class IRGenerator:
         elif node.name == 'double':
             base_type = ir.DoubleType()
         elif node.name.startswith('struct '):
-            # Handle struct types
+            # Handle struct types with space
             struct_name = node.name[7:]  # Remove 'struct ' prefix
+            if hasattr(self, 'struct_types') and struct_name in self.struct_types:
+                base_type = self.struct_types[struct_name]['type']
+            else:
+                # Unknown struct type - create a placeholder
+                base_type = ir.IntType(32)  # Default fallback
+                self.logger.warning(f"Unknown struct type: {struct_name}")
+        elif node.name.startswith('struct'):
+            # Handle struct types without space (concatenated like "structPoint")
+            struct_name = node.name[6:]  # Remove 'struct' prefix
             if hasattr(self, 'struct_types') and struct_name in self.struct_types:
                 base_type = self.struct_types[struct_name]['type']
             else:
@@ -564,13 +554,14 @@ class IRGenerator:
                 return ir.Constant(ir.IntType(8), ord(node.value))
             else:
                 return ir.Constant(ir.IntType(8), int(node.value))
-        elif node.type == 'string':            # Handle string constants - delegate to StringLiteral logic
+        elif node.type == 'string':
+            # Handle string constants - delegate to StringLiteral logic
             return self._create_string_constant(str(node.value))
         else:
             # Default to integer
             return ir.Constant(ir.IntType(32), int(node.value))
     
-    def visit_MemberAccess(self, node) -> ir.Value:
+    def visit_MemberAccess(self, node, as_pointer: bool = False) -> ir.Value:
         """Generate IR for member access."""
         self.logger.debug(f"Visiting member access: {node.base}.{node.member}")
         
@@ -581,16 +572,31 @@ class IRGenerator:
             # Check if we have struct type information for this variable
             if hasattr(self, 'struct_types') and hasattr(self, 'variable_types'):
                 var_type = self.variable_types.get(node.base.name)
-                if var_type and var_type in self.struct_types:
-                    struct_info = self.struct_types[var_type]
-                    if node.member in struct_info['fields']:
-                        # Generate GEP instruction for struct member access
-                        field_index = struct_info['fields'][node.member]
-                        member_ptr = self.builder.gep(base_ptr, [
-                            ir.Constant(ir.IntType(32), 0),  # Dereference the struct pointer
-                            ir.Constant(ir.IntType(32), field_index)  # Access the field
-                        ])
-                        return self.builder.load(member_ptr)
+                if var_type:
+                    # Handle different struct type name formats
+                    struct_name = None
+                    if var_type.startswith('struct '):
+                        struct_name = var_type[7:]  # Remove 'struct ' prefix
+                    elif var_type.startswith('struct'):
+                        struct_name = var_type[6:]  # Remove 'struct' prefix (concatenated)
+                    else:
+                        struct_name = var_type  # Direct struct name
+                    
+                    if struct_name and struct_name in self.struct_types:
+                        struct_info = self.struct_types[struct_name]
+                        if node.member in struct_info['fields']:
+                            # Generate GEP instruction for struct member access
+                            field_index = struct_info['fields'][node.member]
+                            member_ptr = self.builder.gep(base_ptr, [
+                                ir.Constant(ir.IntType(32), 0),  # Dereference the struct pointer
+                                ir.Constant(ir.IntType(32), field_index)  # Access the field
+                            ])
+                            
+                            # Return pointer if requested, otherwise load the value
+                            if as_pointer:
+                                return member_ptr
+                            else:
+                                return self.builder.load(member_ptr)
         
         # Fallback to flattened variable approach for backward compatibility
         # Simple approach: concatenate base and member names

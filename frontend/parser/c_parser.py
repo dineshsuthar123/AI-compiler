@@ -770,15 +770,13 @@ class ASTBuilder(CListener):
                 if hasattr(self, 'struct_fields'):
                     self.struct_fields.append(field_decl)
                     self.logger.debug(f"Added struct field: {field_name} of type {self.current_struct_type}")
-    
     def enterBlockItem(self, ctx):
         """Enter a parse tree produced by CParser.blockItem."""
         print(f"=== ENTERING BLOCK ITEM: {ctx.getText()} ===")
         # Block items can be declarations or statements
         if ctx.declaration():
             print(f"Block item is a DECLARATION: {ctx.declaration().getText()}")
-            # Manually trigger declaration processing
-            self.enterDeclaration(ctx.declaration())
+            # Don't manually trigger - let ANTLR's tree walking handle it
         elif ctx.statement():
             print(f"Block item is a STATEMENT: {ctx.statement().getText()}")
         else:
