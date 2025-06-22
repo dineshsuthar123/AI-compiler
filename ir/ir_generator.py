@@ -178,8 +178,8 @@ class IRGenerator:
             elif isinstance(node.left, MemberAccess):
                 # Handle member access assignment (e.g., p.x = 3.0)
                 # Use the GEP pointer from visit_MemberAccess
-                ptr = self.visit(node.left, as_pointer=True)
-                
+                ptr = self.visit_MemberAccess(node.left, as_pointer=True)
+            
                 # Perform type conversion if needed
                 if hasattr(right, 'type') and hasattr(ptr.type, 'pointee'):
                     if ptr.type.pointee != right.type:
@@ -194,17 +194,16 @@ class IRGenerator:
                         # Convert float/double to integer
                         elif isinstance(right.type, (ir.FloatType, ir.DoubleType)) and isinstance(ptr.type.pointee, ir.IntType):
                             right = self.builder.fptosi(right, ptr.type.pointee)
-                
+            
                 self.builder.store(right, ptr)
                 return right
             elif isinstance(node.left, Identifier):
                 var_name = node.left.name
-                ptr = self.symbol_table[var_name]
-                # If the variable is a pointer, store pointer value directly
+                ptr = self.symbol_table[var_name]                # If the variable is a pointer, store pointer value directly
                 if isinstance(ptr.type.pointee, ir.PointerType):
                     # If right is an identifier, get its pointer
                     if isinstance(node.right, Identifier):
-                        right_ptr = self.visit(node.right, as_pointer=True)
+                        right_ptr = self.visit_Identifier(node.right, as_pointer=True)
                         self.builder.store(right_ptr, ptr)
                     else:
                         self.builder.store(right, ptr)
@@ -452,16 +451,17 @@ class IRGenerator:
         else:
             func = self.module.get_global(node.function.name)
             if func is None:
-                raise ValueError(f"Function {node.function.name} not found")
-        # Generate IR for arguments, matching pointer types
+                raise ValueError(f"Function {node.function.name} not found")        # Generate IR for arguments, matching pointer types
         args = []
         for idx, arg in enumerate(node.arguments):
             if idx < len(func.args) and func.args[idx] is not None and isinstance(func.args[idx].type, ir.PointerType):
                 # Pass pointer for pointer parameter
                 if isinstance(arg, Identifier):
-                    args.append(self.visit(arg, as_pointer=True))
+                    args.append(self.visit_Identifier(arg, as_pointer=True))
                 else:
                     args.append(self.visit(arg))
+            else:
+                args.append(self.visit(arg))
         return self.builder.call(func, args)
     
     def visit_IntegerLiteral(self, node: IntegerLiteral) -> ir.Constant:
