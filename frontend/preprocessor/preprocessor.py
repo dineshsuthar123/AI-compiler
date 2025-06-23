@@ -14,12 +14,12 @@ class Preprocessor:
         self.include_paths = include_paths or []
         self.include_paths.append(str(Path(__file__).parent.parent / 'stdlib'))
         self.macros: Dict[str, str] = {}
-        
-        # Regular expressions for preprocessor directives
+          # Regular expressions for preprocessor directives
         self.include_regex = re.compile(r'#include\s*[<"]([^>"]+)[>"]')
         self.define_regex = re.compile(r'#define\s+(\w+)(?:\s+(.+))?')
         self.ifdef_regex = re.compile(r'#ifdef\s+(\w+)')
         self.ifndef_regex = re.compile(r'#ifndef\s+(\w+)')
+        self.else_regex = re.compile(r'#else')
         self.endif_regex = re.compile(r'#endif')
         
     def find_header(self, header_name: str) -> Optional[str]:
@@ -96,8 +96,7 @@ class Preprocessor:
         Args:
             source: Source code to process
             processed_files: List of already processed files
-            
-        Returns:
+              Returns:
             Processed source code
         """
         if processed_files is None:
@@ -105,42 +104,53 @@ class Preprocessor:
             
         lines = source.split('\n')
         result = []
-        skip_until_endif = False
+        conditional_stack = []  # Stack to handle nested conditionals
         
         for line in lines:
             # Handle #include
             include_match = self.include_regex.match(line)
             if include_match:
-                result.append(self.process_include(include_match, processed_files))
+                if not conditional_stack or conditional_stack[-1]:
+                    result.append(self.process_include(include_match, processed_files))
                 continue
                 
             # Handle #define
             define_match = self.define_regex.match(line)
             if define_match:
-                result.append(self.process_define(define_match))
+                if not conditional_stack or conditional_stack[-1]:
+                    result.append(self.process_define(define_match))
                 continue
                 
             # Handle #ifdef
             ifdef_match = self.ifdef_regex.match(line)
             if ifdef_match:
                 macro_name = ifdef_match.group(1)
-                skip_until_endif = macro_name not in self.macros
+                condition_met = macro_name in self.macros
+                conditional_stack.append(condition_met)
                 continue
                 
             # Handle #ifndef
             ifndef_match = self.ifndef_regex.match(line)
             if ifndef_match:
                 macro_name = ifndef_match.group(1)
-                skip_until_endif = macro_name in self.macros
+                condition_met = macro_name not in self.macros
+                conditional_stack.append(condition_met)
+                continue
+                
+            # Handle #else
+            if self.else_regex.match(line):
+                if conditional_stack:
+                    conditional_stack[-1] = not conditional_stack[-1]
                 continue
                 
             # Handle #endif
             if self.endif_regex.match(line):
-                skip_until_endif = False
+                if conditional_stack:
+                    conditional_stack.pop()
                 continue
                 
             # Skip lines if inside a false conditional block
-            if skip_until_endif:
+            if conditional_stack and not conditional_stack[-1]:
                 continue
                 
             # Expand macros in the line

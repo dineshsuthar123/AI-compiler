@@ -95,6 +95,8 @@
             left: 0;
             width: 100%;
             background: rgba(15, 15, 35, 0.8);
+            -webkit-backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
             backdrop-filter: blur(20px);
             padding: 1rem 2rem;
             z-index: 1000;
@@ -191,7 +193,12 @@
             border-radius: 50px;
             font-size: 0.9rem;
             color: var(--primary);
-            margin-bottom: 2rem;
+            -webkit-backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            backdrop-filter: blur(10px);
             backdrop-filter: blur(10px);
         }
 
@@ -832,8 +839,10 @@
                     <div>
                         <label class="control-label">AI Optimization</label>
                         <label class="toggle">
-                            <input type="checkbox" id="aiOptimization">
-                            <span class="toggle-slider"></span>
+                            <label title="Enable AI Optimization" style="margin:0;">
+                                <input type="checkbox" id="aiOptimization" title="Enable AI Optimization">
+                                <span class="toggle-slider"></span>
+                            </label>
                         </label>
                     </div>
                 </div>
@@ -989,11 +998,10 @@ int main() {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
+                    }, body: JSON.stringify({
                         code: code,
                         optimization_level: optimizationLevel,
-                        ai_enabled: aiEnabled
+                        ai_enhanced: aiEnabled
                     })
                 });
 
@@ -1034,7 +1042,7 @@ int main() {
                         <strong>Optimization:</strong> Level ${result.optimization_level}
                     </div>
                     <div style="background: rgba(0,212,255,0.1); padding: 0.5rem; border-radius: 6px;">
-                        <strong>AI Enhanced:</strong> ${result.ai_enabled ? 'Yes' : 'No'}
+                        <strong>AI Enhanced:</strong> ${result.ai_enhanced ? 'Yes' : 'No'}
                     </div>
                     <div style="background: rgba(0,212,255,0.1); padding: 0.5rem; border-radius: 6px;">
                         <strong>Time:</strong> ${result.compilation_time}ms

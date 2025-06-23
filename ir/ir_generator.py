@@ -34,6 +34,10 @@ class IRGenerator:
         # Declare printf function
         printf_type = ir.FunctionType(ir.IntType(32), [ir.PointerType(ir.IntType(8))], var_arg=True)
         self.printf_func = ir.Function(self.module, printf_type, name="printf")
+        
+        # Declare scanf function
+        scanf_type = ir.FunctionType(ir.IntType(32), [ir.PointerType(ir.IntType(8))], var_arg=True)
+        self.scanf_func = ir.Function(self.module, scanf_type, name="scanf")
     
     def _create_string_constant(self, value: str) -> ir.Constant:
         """Create a string constant in the LLVM module."""
@@ -433,8 +437,7 @@ class IRGenerator:
         elif isinstance(node, UnaryOp) and node.op == '&':
             # Address-of
             return self.visit(node.operand)
-        elif isinstance(node, UnaryOp) and node.op == '*':
-            # Dereference
+        elif isinstance(node, UnaryOp) and node.op == '*':            # Dereference
             ptr = self.visit(node.operand)
             return self.builder.load(ptr)
         else:
@@ -448,20 +451,36 @@ class IRGenerator:
         # Get the function
         if isinstance(node.function, Identifier) and node.function.name == "printf":
             func = self.printf_func
+        elif isinstance(node.function, Identifier) and node.function.name == "scanf":
+            func = self.scanf_func
         else:
             func = self.module.get_global(node.function.name)
             if func is None:
-                raise ValueError(f"Function {node.function.name} not found")        # Generate IR for arguments, matching pointer types
+                raise ValueError(f"Function {node.function.name} not found")
+          # Generate IR for arguments, handling special cases for scanf/printf
         args = []
         for idx, arg in enumerate(node.arguments):
-            if idx < len(func.args) and func.args[idx] is not None and isinstance(func.args[idx].type, ir.PointerType):
-                # Pass pointer for pointer parameter
-                if isinstance(arg, Identifier):
+            # Special handling for scanf arguments - it expects pointers
+            if isinstance(node.function, Identifier) and node.function.name == "scanf":
+                if isinstance(arg, UnaryOp) and arg.op == '&':
+                    # Address-of operator - we want the address
+                    args.append(self.visit(arg))
+                elif isinstance(arg, Identifier):
+                    # For scanf, if it's just an identifier, we need its address
                     args.append(self.visit_Identifier(arg, as_pointer=True))
                 else:
+                    # String literals and other expressions
                     args.append(self.visit(arg))
             else:
-                args.append(self.visit(arg))
+                # For other functions, standard argument handling
+                if idx < len(func.args) and func.args[idx] is not None and isinstance(func.args[idx].type, ir.PointerType):
+                    # Pass pointer for pointer parameter
+                    if isinstance(arg, Identifier):
+                        args.append(self.visit_Identifier(arg, as_pointer=True))
+                    else:
+                        args.append(self.visit(arg))
+                else:
+                    args.append(self.visit(arg))
         return self.builder.call(func, args)
     
     def visit_IntegerLiteral(self, node: IntegerLiteral) -> ir.Constant:

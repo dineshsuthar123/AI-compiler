@@ -1,20 +1,14 @@
-// Standard I/O functions
-int printf(const char* format, ...);
-int scanf(const char* format, ...);
-int puts(const char* str);
+// Standard I/O functions - simplified for parser compatibility
+int printf(char *format);
+int scanf(char *format);
+int puts(char *str);
 int getchar(void);
 int putchar(int c);
 
-// File operations
-typedef void* FILE;
-FILE* fopen(const char* filename, const char* mode);
-int fclose(FILE* stream);
-int fprintf(FILE* stream, const char* format, ...);
-int fscanf(FILE* stream, const char* format, ...);
-int fgetc(FILE* stream);
-int fputc(int c, FILE* stream);
-
-// Standard streams
-extern FILE* stdin;
-extern FILE* stdout;
-extern FILE* stderr; 
+// Simplified file operations
+int fopen(char *filename, char *mode);
+int fclose(int stream);
+int fprintf(int stream, char *format);
+int fscanf(int stream, char *format);
+int fgetc(int stream);
+int fputc(int c, int stream);

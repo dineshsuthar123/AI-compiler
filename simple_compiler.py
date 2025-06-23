@@ -15,6 +15,7 @@ import os
 
 from frontend import plugin_manager
 from frontend.parser import Parser
+from frontend.preprocessor.preprocessor import Preprocessor
 from ir.ir_generator import IRGenerator
 from ir.ir_formatter import IRFormatter
 from ir.ir_executor import IRExecutor
@@ -27,8 +28,8 @@ class ModernCompiler:
         self.config = self._load_config(config)
         self.logger = logging.getLogger(__name__)
         self._setup_logging()
-        
-        # Initialize components
+          # Initialize components
+        self.preprocessor = Preprocessor(include_paths=self.config.get('include_paths', []))
         self.parser = Parser()
         self.ir_generator = IRGenerator()
         self.ir_formatter = IRFormatter()
@@ -100,8 +101,7 @@ class ModernCompiler:
         Args:
             source: Source code string or path to source file
             execute: Whether to execute the compiled code
-            
-        Returns:
+              Returns:
             Generated LLVM IR code as string
         """
         self.logger.info("Starting compilation process")
@@ -114,9 +114,13 @@ class ModernCompiler:
             else:
                 source_code = source
             
+            # Preprocess source code (handle #include, #define, etc.)
+            self.logger.info("Preprocessing source code")
+            preprocessed_code = self.preprocessor.process(source_code)
+            
             # Process source through plugins
             self.logger.info("Processing source code through plugins")
-            processed_code = plugin_manager.process_source(source_code, self.config)
+            processed_code = plugin_manager.process_source(preprocessed_code, self.config)
             
             # Parse source code into AST
             self.logger.info("Parsing source code into AST")
@@ -156,8 +160,7 @@ class ModernCompiler:
         
         Args:
             source: Source code string or path to source file
-            
-        Returns:
+              Returns:
             Generated LLVM IR code as string
         """
         try:
@@ -168,8 +171,11 @@ class ModernCompiler:
             else:
                 source_code = source
             
+            # Preprocess source code (handle #include, #define, etc.)
+            preprocessed_code = self.preprocessor.process(source_code)
+            
             # Process source through plugins
-            processed_code = plugin_manager.process_source(source_code, self.config)
+            processed_code = plugin_manager.process_source(preprocessed_code, self.config)
             
             # Parse source code into AST
             ast = self.parser.parse(processed_code)
@@ -256,8 +262,7 @@ class ModernCompiler:
     def save_config(self, path: Optional[str] = None):
         """Save the current configuration to a file."""
         if path is None:
-            path = 'compiler_config.yaml'
-        
+            path = 'compiler_config.yaml'        
         with open(path, 'w') as f:
             yaml.dump(self.config, f, default_flow_style=False)
     
@@ -266,134 +271,70 @@ class ModernCompiler:
         with open(path, 'r') as f:
             self.config = yaml.safe_load(f)
         self._init_plugins()
+
+    def add_include_path(self, path: str):
+        """Add an include path for header file resolution.
+        
+        Args:
+            path: Path to add to the include search paths
+        """
+        self.preprocessor.include_paths.append(path)
+        self.config['include_paths'].append(path)
     
-    def compile_and_execute(self, source: str) -> dict:
-        """Compile and execute C code, returning the actual program output.
+    def add_macro(self, name: str, value: str = ''):
+        """Add a preprocessor macro.
+        
+        Args:
+            name: Macro name
+            value: Macro value (empty string for flag-style macros)
+        """
+        self.preprocessor.macros[name] = value
+        self.config['macros'][name] = value
+    
+    def compile_and_execute(self, source: str, optimization_level: int = 0, ai_enhanced: bool = False) -> Dict[str, Any]:
+        """Enhanced compilation method with additional options.
         
         Args:
             source: Source code string or path to source file
+            optimization_level: Optimization level (0-3)
+            ai_enhanced: Whether to use AI-enhanced optimization
             
         Returns:
-            Dictionary containing execution result and metadata
+            Dictionary containing compilation results and metadata
         """
-        self.logger.info("Starting compilation and execution")
+        # Update config with runtime options
+        self.config['optimization_level'] = optimization_level
+        self.config['ai_enhanced'] = ai_enhanced
+        
+        start_time = __import__('time').time()
         
         try:
-            # Read source code if it's a file path
-            if Path(source).exists():
-                with open(source, 'r') as f:
-                    source_code = f.read()
-            else:
-                source_code = source
-
-            # Process source through plugins
-            self.logger.info("Processing source code through plugins")
-            processed_code = plugin_manager.process_source(source_code, self.config)
-
-            # Parse source code into AST
-            self.logger.info("Parsing source code into AST")
-            ast = self.parser.parse(processed_code)
-
-            # Generate LLVM IR
-            self.logger.info("Generating LLVM IR")
-            self.ir_generator.visit(ast)
-            ir_code = str(self.ir_generator.module)
-
-            # Check for main function in IR
-            main_func_pattern = re.compile(r'define\s+\w+\s+@("main"|main)\s*\(')
-            if not main_func_pattern.search(ir_code):
-                raise RuntimeError("No 'main' function found in the generated IR. Please ensure your C code contains a valid 'int main()' function.")
-
-            # Try to execute using a simpler approach - compile to executable and run
-            self.logger.info("Executing compiled code")
+            # Compile the source
+            ir_code = self.compile(source, execute=False)
             
-            try:
-                # Create temporary files
-                import tempfile
-                import os
-                
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.c', delete=False) as temp_c:
-                    temp_c.write(processed_code)
-                    temp_c_path = temp_c.name
-                
-                temp_exe_path = temp_c_path.replace('.c', '.exe')
-                
-                try:
-                    # Try to compile with gcc/clang if available
-                    compile_cmd = ['gcc', '-o', temp_exe_path, temp_c_path]
-                    compile_result = subprocess.run(compile_cmd, capture_output=True, text=True, timeout=10)
-                    
-                    if compile_result.returncode != 0:
-                        # If gcc fails, try clang
-                        compile_cmd = ['clang', '-o', temp_exe_path, temp_c_path]
-                        compile_result = subprocess.run(compile_cmd, capture_output=True, text=True, timeout=10)
-                        
-                        if compile_result.returncode != 0:
-                            # If both fail, fall back to our LLVM execution
-                            raise subprocess.CalledProcessError(compile_result.returncode, compile_cmd)
-                    
-                    # Execute the compiled program
-                    exec_result = subprocess.run([temp_exe_path], capture_output=True, text=True, timeout=5)
-                    output = exec_result.stdout
-                    
-                    if exec_result.stderr:
-                        output += f"\nErrors: {exec_result.stderr}"
-                    
-                    if not output.strip():
-                        output = f"Program executed successfully (exit code: {exec_result.returncode})\n"
-                        
-                except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
-                    # Fall back to pattern matching for simple cases
-                    if 'printf' in source_code:
-                        # Extract strings from printf calls
-                        printf_pattern = r'printf\s*\(\s*"([^"]*)"'
-                        matches = re.findall(printf_pattern, source_code)
-                        if matches:
-                            output = ""
-                            for match in matches:
-                                formatted_string = match.replace('\\n', '\n').replace('\\t', '\t')
-                                output += formatted_string
-                            if not output.endswith('\n'):
-                                output += '\n'
-                        else:
-                            output = "Hello, World!\n"
-                    else:
-                        # Try LLVM execution for return code
-                        try:
-                            return_code = self.ir_executor.execute(ir_code)
-                            output = f"Program executed successfully. Exit code: {return_code}\n"
-                        except Exception as e:
-                            output = f"Program compiled successfully but execution details unavailable.\nGenerated LLVM IR (first 200 chars):\n{ir_code[:200]}...\n"
-                
-                finally:
-                    # Clean up temporary files
-                    try:
-                        if os.path.exists(temp_c_path):
-                            os.unlink(temp_c_path)
-                        if os.path.exists(temp_exe_path):
-                            os.unlink(temp_exe_path)
-                    except:
-                        pass
-
-            except Exception as exec_error:
-                self.logger.warning(f"Execution error: {exec_error}")
-                output = f"Compilation succeeded, but execution failed: {str(exec_error)}\n"
-
-            self.logger.info("Compilation and execution completed successfully")
+            # Execute and capture output
+            execution_result = self.ir_executor.execute(str(self.ir_generator.module))
+            
+            end_time = __import__('time').time()
             
             return {
                 'success': True,
-                'output': output,
                 'ir_code': ir_code,
-                'source_lines': len(source_code.splitlines()),
-                'message': 'Program compiled and executed successfully'
+                'output': execution_result,
+                'optimization_level': optimization_level,
+                'ai_enhanced': ai_enhanced,
+                'compilation_time': end_time - start_time,
+                'errors': []
             }
             
         except Exception as e:
-            self.logger.error(f"Compilation/execution failed: {str(e)}")
+            end_time = __import__('time').time()
             return {
                 'success': False,
+                'ir_code': '',
                 'output': '',
-                'error': str(e),
-                'message': 'Compilation failed'
+                'optimization_level': optimization_level,
+                'ai_enhanced': ai_enhanced,
+                'compilation_time': end_time - start_time,
+                'errors': [str(e)]
             }

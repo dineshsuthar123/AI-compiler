@@ -263,12 +263,6 @@ class ASTBuilder(CListener):
         """Enter a parse tree produced by CParser.primaryExpression."""
         print(f"Entering primary expression: {ctx.getText()}")
         text = ctx.getText()
-        if text.startswith('&'):
-            self.warn("Address-of operator (&) is not fully supported yet. Skipping.")
-            return
-        if text.startswith('*'):
-            self.warn("Dereference operator (*) is not fully supported yet. Skipping.")
-            return
         if ctx.Identifier():
             # Handle identifier
             name = ctx.Identifier().getText()
@@ -787,6 +781,48 @@ class ASTBuilder(CListener):
         print(f"=== ENTERING BLOCK ITEM LIST ===")
         if ctx.blockItem():
             print(f"Found {len(ctx.blockItem())} block items")
+    
+    def enterUnaryExpression(self, ctx):
+        """Enter a parse tree produced by CParser.unaryExpression."""
+        print(f"Entering unary expression: {ctx.getText()}")
+        
+        # Check if this is a unary operator + expression
+        if ctx.unaryOperator() and len(ctx.children) == 2:
+            # This will be handled in exitUnaryExpression
+            self.expr_stack.append([])
+    
+    def exitUnaryExpression(self, ctx):
+        """Exit a parse tree produced by CParser.unaryExpression."""
+        print(f"Exiting unary expression: {ctx.getText()}")
+        
+        # Check if this is a unary operator + expression  
+        if ctx.unaryOperator() and len(ctx.children) == 2:
+            # Get the operator
+            operator_text = ctx.unaryOperator().getText()
+            print(f"Found unary operator: {operator_text}")
+            
+            # Get the operand expression
+            operand_expr = self.safe_pop(self.expr_stack)
+            print(f"Operand expression: {operand_expr}")
+            
+            # Create UnaryOp node
+            unary_op = UnaryOp(op=operator_text, operand=operand_expr)
+            print(f"Created unary operation: {unary_op}")
+            
+            # Add to parent expression stack
+            if self.expr_stack:
+                self.expr_stack[-1].append(unary_op)
+                print(f"Current expression stack: {self.expr_stack}")
+    
+    def enterUnaryOperator(self, ctx):
+        """Enter a parse tree produced by CParser.unaryOperator."""
+        print(f"Entering unary operator: {ctx.getText()}")
+        # No action needed - just for debugging
+    
+    def exitUnaryOperator(self, ctx):
+        """Exit a parse tree produced by CParser.unaryOperator."""
+        print(f"Exiting unary operator: {ctx.getText()}")
+        # No action needed - handled in exitUnaryExpression
 
 # === TODO: FULL C SUPPORT STUBS ===
 # TODO: Support for struct/union/enum/typedef parsing

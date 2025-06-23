@@ -60,6 +60,35 @@ stats_thread.start()
 def index():
     return render_template('index.html')
 
+# Examples endpoint for loading sample programs
+@app.route('/api/examples')
+def get_examples():
+    """Return list of example C programs."""
+    examples = []
+    examples_dir = Path('examples')
+    if examples_dir.exists():
+        for file_path in examples_dir.glob('*.c'):
+            try:
+                with open(file_path, 'r') as f:
+                    code = f.read()
+                examples.append({ 'name': file_path.stem, 'description': file_path.name, 'code': code })
+            except Exception as e:
+                logger.error(f"Error loading example {file_path}: {e}")
+    return jsonify({ 'examples': examples })
+
+# Stats endpoint for dashboard metrics
+@app.route('/api/stats')
+def get_stats():
+    """Return compilation statistics for dashboard."""
+    total = len(compilation_history)
+    successes = sum(1 for e in compilation_history if e.get('success'))
+    success_rate = round((successes / total * 100) if total else 0, 2)
+    avg_time_sec = (sum(e['compile_time'] for e in compilation_history) / total) if total else 0
+    average_time_ms = round(avg_time_sec * 1000, 2)
+    ai_count = sum(1 for e in compilation_history if e.get('ai_enhanced'))
+    ai_rate = round((ai_count / total * 100) if total else 0, 2)
+    return jsonify({ 'total_compilations': total, 'success_rate': success_rate, 'average_compilation_time': average_time_ms, 'ai_usage_rate': ai_rate })
+
 @app.route('/api/system-info')
 def get_system_info():
     """Get system information for dashboard"""
@@ -359,15 +388,26 @@ def compile_code():
     """Main compilation endpoint with enhanced features"""
     try:
         data = request.json
+        logger.info(f"Received compilation request: {data}")
+        
         code = data.get('code', '')
         config = data.get('config', {})
         session_id = data.get('session_id', str(uuid.uuid4()))
         
+        # Extract optimization settings from request
+        optimization_level = data.get('optimization_level', 0)
+        ai_enhanced = data.get('ai_enhanced', False)
+        
+        logger.info(f"Optimization level: {optimization_level}, AI enhanced: {ai_enhanced}")
+        logger.info(f"Code length: {len(code)} characters")
+        
         if not code.strip():
             return jsonify({'success': False, 'error': 'No code provided'})
         
-        # Update compiler configuration
+        # Update compiler configuration with optimization settings
         compiler.config.update(config)
+        compiler.config['optimization_level'] = optimization_level
+        compiler.config['ai_enhanced'] = ai_enhanced
         
         # Track compilation start
         start_time = time.time()
@@ -378,10 +418,21 @@ def compile_code():
         active_sessions[session_id] = {
             'start_time': start_time,
             'code_length': len(code),
-            'config': config
+            'config': config,
+            'optimization_level': optimization_level,
+            'ai_enhanced': ai_enhanced
         }
           # Compile and execute the code
-        compilation_result = compiler.compile_and_execute(code)
+        logger.info("Starting compilation with compiler.compile_and_execute()")
+        try:
+            compilation_result = compiler.compile_and_execute(code)
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            logger.error(f"Unhandled exception during compile_and_execute: {tb}")
+            return jsonify({'success': False, 'error': tb, 'message': 'Unhandled exception occurred'}), 500
+        
+        logger.info(f"Compilation result: {compilation_result}")
         
         # Calculate compilation time
         compile_time = time.time() - start_time
@@ -398,7 +449,9 @@ def compile_code():
             'code_length': len(code),
             'compile_time': compile_time,
             'success': compilation_result['success'],
-            'config': config
+            'config': config,
+            'optimization_level': optimization_level,
+            'ai_enhanced': ai_enhanced
         }
         compilation_history.append(compilation_entry)
         
@@ -409,22 +462,25 @@ def compile_code():
         # Clean up session
         if session_id in active_sessions:
             del active_sessions[session_id]
-        
         if compilation_result['success']:
             return jsonify({
                 'success': True, 
-                'result': compilation_result['output'],  # Return actual program output
-                'compile_time': compile_time,
+                'result': compilation_result.get('output', ''),  # Return actual program output
+                'compile_time': round(compile_time * 1000, 2),  # Return time in milliseconds
+                'compilation_time': round(compile_time * 1000, 2),  # Add this for frontend compatibility
+                'optimization_level': optimization_level,
+                'ai_enhanced': ai_enhanced,
                 'session_id': session_id,
-                'message': compilation_result['message'],
+                'message': compilation_result.get('message', ''),
                 'ir_code': compilation_result.get('ir_code', ''),  # Include IR for advanced users
                 'source_lines': compilation_result.get('source_lines', 0)
             })
         else:
             return jsonify({
                 'success': False,
-                'error': compilation_result['error'],
-                'message': compilation_result['message'],
+                'error': compilation_result.get('error', 'Unknown compilation error'),
+                'message': compilation_result.get('message', ''),
+                'compilation_time': round(compile_time * 1000, 2),
                 'session_id': session_id
             })
         
@@ -439,6 +495,62 @@ def compile_code():
         if 'session_id' in locals() and session_id in active_sessions:
             del active_sessions[session_id]
         
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/get-ir', methods=['POST'])
+def get_ir_code():
+    """Get the generated LLVM IR for given C code"""
+    try:
+        data = request.json
+        code = data.get('code', '')
+        config = data.get('config', {})
+        optimization_level = data.get('optimization_level', 0)
+        ai_enhanced = data.get('ai_enhanced', False)
+        
+        if not code.strip():
+            return jsonify({'success': False, 'error': 'No code provided'})
+        
+        # Update compiler configuration
+        compiler.config.update(config)
+        compiler.config['optimization_level'] = optimization_level
+        compiler.config['ai_enhanced'] = ai_enhanced
+        
+        start_time = time.time()
+        
+        # Generate IR without execution
+        ir_code = compiler.compile(code, execute=False)
+        
+        compile_time = time.time() - start_time
+        
+        # Analyze the generated IR
+        lines = ir_code.split('\n')
+        struct_count = sum(1 for line in lines if 'alloca {' in line)
+        gep_count = sum(1 for line in lines if 'getelementptr' in line)
+        store_count = sum(1 for line in lines if 'store' in line)
+        load_count = sum(1 for line in lines if 'load' in line)
+        function_count = sum(1 for line in lines if line.strip().startswith('define'))
+        
+        analysis = {
+            'total_lines': len(lines),
+            'struct_allocations': struct_count,
+            'member_access_ops': gep_count,
+            'store_operations': store_count,
+            'load_operations': load_count,
+            'function_definitions': function_count,
+            'optimization_level': optimization_level,
+            'ai_enhanced': ai_enhanced
+        }
+        
+        return jsonify({
+            'success': True,
+            'ir_code': ir_code,
+            'compile_time': round(compile_time * 1000, 2),
+            'analysis': analysis,
+            'message': 'IR generated successfully'
+        })
+        
+    except Exception as e:
+        logger.error(f"IR generation error: {e}")
         return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/compilation-history')
@@ -479,13 +591,13 @@ if __name__ == '__main__':
     # Start background monitoring
     monitor_thread = threading.Thread(target=update_system_stats, daemon=True)
     monitor_thread.start()
-    
+
     print("🚀 Starting AI-Powered C Compiler Web Interface...")
     print("📡 Server will be available at: http://localhost:5000")
     print("🤖 AI features: Enabled")
     print("⚡ Real-time monitoring: Active")
     print("🎯 Ready to compile C code!")
-    
+
     # Start Flask app
     app.run(
         host='0.0.0.0',
