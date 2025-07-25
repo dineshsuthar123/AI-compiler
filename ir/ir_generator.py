@@ -41,12 +41,17 @@ class IRGenerator:
     
     def _create_string_constant(self, value: str) -> ir.Constant:
         """Create a string constant in the LLVM module."""
-        # Properly escape backslashes and handle newlines
-        str_val = value.replace('\\', '\\\\').replace('\n', '\\n') + "\0"
+        # Process escape sequences correctly for LLVM IR
+        # Convert C-style escape sequences to actual characters
+        processed_value = value.replace('\\n', '\n').replace('\\t', '\t').replace('\\r', '\r').replace('\\\\', '\\')
         
-        # Create a global string constant
-        str_type = ir.ArrayType(ir.IntType(8), len(str_val))
-        str_const = ir.Constant(str_type, bytearray(str_val.encode("utf-8")))
+        # Add null terminator
+        str_val = processed_value + "\0"
+        
+        # Create a global string constant with correct size
+        str_bytes = str_val.encode("utf-8")
+        str_type = ir.ArrayType(ir.IntType(8), len(str_bytes))
+        str_const = ir.Constant(str_type, bytearray(str_bytes))
         
         # Create a global variable for the string
         str_global = ir.GlobalVariable(self.module, str_type, ".str")
@@ -153,6 +158,17 @@ class IRGenerator:
         left = self.visit(node.left)
         right = self.visit(node.right)
         
+        # Pointer arithmetic support
+        if node.op in ('+', '-'):
+            # If left is a pointer and right is int, do pointer arithmetic
+            if hasattr(left, 'type') and isinstance(left.type, ir.PointerType) and hasattr(right, 'type') and isinstance(right.type, ir.IntType):
+                if node.op == '+':
+                    return self.builder.gep(left, [right])
+                elif node.op == '-':
+                    neg_right = self.builder.neg(right)
+                    return self.builder.gep(left, [neg_right])
+        
+        # Fallback to existing logic
         if node.op == '+':
             return self.builder.add(left, right)
         elif node.op == '-':
@@ -180,25 +196,17 @@ class IRGenerator:
                 self.builder.store(right, ptr)
                 return right
             elif isinstance(node.left, MemberAccess):
-                # Handle member access assignment (e.g., p.x = 3.0)
-                # Use the GEP pointer from visit_MemberAccess
                 ptr = self.visit_MemberAccess(node.left, as_pointer=True)
-            
-                # Perform type conversion if needed
                 if hasattr(right, 'type') and hasattr(ptr.type, 'pointee'):
                     if ptr.type.pointee != right.type:
-                        # Convert between float/double types
                         if isinstance(ptr.type.pointee, ir.DoubleType) and isinstance(right.type, ir.FloatType):
                             right = self.builder.fpext(right, ir.DoubleType())
                         elif isinstance(ptr.type.pointee, ir.FloatType) and isinstance(right.type, ir.DoubleType):
                             right = self.builder.fptrunc(right, ir.FloatType())
-                        # Convert integer to float/double
                         elif isinstance(ptr.type.pointee, (ir.FloatType, ir.DoubleType)) and isinstance(right.type, ir.IntType):
                             right = self.builder.sitofp(right, ptr.type.pointee)
-                        # Convert float/double to integer
                         elif isinstance(right.type, (ir.FloatType, ir.DoubleType)) and isinstance(ptr.type.pointee, ir.IntType):
                             right = self.builder.fptosi(right, ptr.type.pointee)
-            
                 self.builder.store(right, ptr)
                 return right
             elif isinstance(node.left, Identifier):
@@ -641,57 +649,124 @@ class IRGenerator:
             self.builder.store(zero, ptr)
             return self.builder.load(ptr)
 
-# === STRUCT SUPPORT STUBS ===
-# TODO: Map StructDecl to LLVM struct types
-# TODO: Generate IR for struct allocation, member access, and assignment
+    def visit_StructPointerAccess(self, node: StructPointerAccess, as_pointer: bool = False) -> ir.Value:
+        """Generate IR for struct pointer member access (a->b)."""
+        self.logger.debug(f"Visiting struct pointer access: {node.base}->{node.member}")
+        base_ptr = self.visit(node.base)
+        # Try to resolve struct type and field index
+        if hasattr(node.base, 'name') and hasattr(self, 'variable_types'):
+            var_type = self.variable_types.get(node.base.name)
+            struct_name = None
+            if var_type and var_type.startswith('struct'):
+                struct_name = var_type.split('struct')[-1].strip()
+            if struct_name and hasattr(self, 'struct_types') and struct_name in self.struct_types:
+                struct_info = self.struct_types[struct_name]
+                if node.member in struct_info['fields']:
+                    field_index = struct_info['fields'][node.member]
+                    member_ptr = self.builder.gep(base_ptr, [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), field_index)])
+                    if as_pointer:
+                        return member_ptr
+                    else:
+                        return self.builder.load(member_ptr)
+        # Fallback: treat as pointer to struct with flattened member
+        member_var_name = f"{getattr(node.base, 'name', 'temp')}_{node.member}"
+        if member_var_name in self.symbol_table:
+            ptr = self.symbol_table[member_var_name]
+            return self.builder.load(ptr)
+        else:
+            var_type = ir.DoubleType()
+            ptr = self.builder.alloca(var_type, name=member_var_name)
+            self.symbol_table[member_var_name] = ptr
+            zero = ir.Constant(var_type, 0.0)
+            self.builder.store(zero, ptr)
+            return self.builder.load(ptr)
 
-    def visit_StructDecl(self, node):
-        """Generate IR for struct declaration."""
-        from frontend.ast.nodes import StructDecl
-        
-        if not isinstance(node, StructDecl):
-            return None
-        
-        # Create LLVM struct type
-        field_types = []
-        for field in node.fields:
-            if field.type.name == 'int':
-                field_types.append(ir.IntType(32))
-            elif field.type.name == 'float':
-                field_types.append(ir.FloatType())
-            elif field.type.name == 'double':
-                field_types.append(ir.DoubleType())
-            elif field.type.name == 'char':
-                field_types.append(ir.IntType(8))
-            else:
-                # Default to int for unknown types
-                field_types.append(ir.IntType(32))
-        
-        # Create the struct type
+    def visit_StructDecl(self, node: StructDecl) -> None:
+        """Map StructDecl to LLVM struct type."""
+        self.logger.debug(f"Visiting struct declaration: {node.name}")
+        field_types = [self.visit(field.type) for field in node.fields]
         struct_type = ir.LiteralStructType(field_types)
-        
-        # Store the struct type for later use
         if not hasattr(self, 'struct_types'):
             self.struct_types = {}
-        self.struct_types[node.name] = {
-            'type': struct_type,
-            'fields': {field.name: i for i, field in enumerate(node.fields)},
-            'field_types': {field.name: field.type.name for field in node.fields}
-        }
-        
-        self.logger.debug(f"Created struct type: {node.name} with {len(node.fields)} fields")
-        return None  # Struct declarations don't produce values
+        self.struct_types[node.name] = {'type': struct_type, 'fields': {field.name: i for i, field in enumerate(node.fields)}}
 
-# === END STRUCT SUPPORT STUBS ===
+    def visit_UnionDecl(self, node: UnionDecl) -> None:
+        """Map UnionDecl to LLVM struct type (as a struct with largest field)."""
+        self.logger.debug(f"Visiting union declaration: {node.name}")
+        # For simplicity, use the largest field type
+        field_types = [self.visit(field.type) for field in node.fields]
+        if field_types:
+            largest_type = max(field_types, key=lambda t: t.get_abi_size(self.module.context))
+        else:
+            largest_type = ir.IntType(32)
+        struct_type = ir.LiteralStructType([largest_type])
+        if not hasattr(self, 'struct_types'):
+            self.struct_types = {}
+        self.struct_types[node.name] = {'type': struct_type, 'fields': {field.name: 0 for field in node.fields}}
 
-# === TODO: FULL C IR GENERATION STUBS ===
-# TODO: Generate IR for struct/union/enum/typedef
-# TODO: Generate IR for arrays and pointer arithmetic
-# TODO: Generate IR for all C control flow (for, while, do-while, switch, goto, break, continue)
-# TODO: Generate IR for all C expressions (bitwise, logical, ternary, cast, sizeof, etc.)
-# TODO: Generate IR for function pointers and variadic functions
-# TODO: Generate IR for preprocessor directives (#include, #define, #ifdef, #ifndef, #endif)
-# TODO: Generate IR for global/static/extern variables
-# TODO: Generate IR for variable scoping and shadowing
-# TODO: Generate IR for error handling and recovery
-# === END FULL C IR GENERATION STUBS ===
+    def visit_ArrayDecl(self, node: ArrayDecl) -> ir.Value:
+        """Generate IR for an array declaration."""
+        self.logger.debug(f"Visiting array declaration: {node.name}[{node.size}]")
+        element_type = self.visit(node.type)
+        array_type = ir.ArrayType(element_type, node.size)
+        ptr = self.builder.alloca(array_type, name=node.name)
+        self.symbol_table[node.name] = ptr
+        # Optionally handle initialization
+        if node.init:
+            # TODO: Support array initialization
+            pass
+        return ptr
+
+    def visit_ArrayIndex(self, node: ArrayIndex) -> ir.Value:
+        """Generate IR for array indexing (a[i])."""
+        self.logger.debug(f"Visiting array index: {node.array}[{node.index}]")
+        array_ptr = self.visit(node.array)
+        index_val = self.visit(node.index)
+        # GEP: get pointer to element
+        element_ptr = self.builder.gep(array_ptr, [ir.Constant(ir.IntType(32), 0), index_val])
+        return self.builder.load(element_ptr)
+
+    def visit_DoWhileStmt(self, node: DoWhileStmt) -> None:
+        """Generate IR for a do-while statement."""
+        self.logger.debug("Visiting do-while statement")
+        body_block = self.builder.append_basic_block('do.body')
+        cond_block = self.builder.append_basic_block('do.cond')
+        end_block = self.builder.append_basic_block('do.end')
+        self.builder.branch(body_block)
+        self.builder.position_at_end(body_block)
+        self.visit(node.body)
+        self.builder.branch(cond_block)
+        self.builder.position_at_end(cond_block)
+        cond_val = self.visit(node.condition)
+        self.builder.cbranch(cond_val, body_block, end_block)
+        self.builder.position_at_end(end_block)
+
+    def visit_SwitchStmt(self, node: SwitchStmt) -> None:
+        """Generate IR for a switch statement."""
+        self.logger.debug("Visiting switch statement")
+        expr_val = self.visit(node.expression)
+        end_block = self.builder.append_basic_block('switch.end')
+        case_blocks = []
+        for case in node.cases:
+            case_block = self.builder.append_basic_block('case')
+            case_blocks.append(case_block)
+        default_block = self.builder.append_basic_block('default') if node.default else end_block
+        # Emit switch instruction
+        switch_inst = self.builder.switch(expr_val, default_block, [(self.visit(case.value), case_blocks[i]) for i, case in enumerate(node.cases)])
+        # Emit case bodies
+        for i, case in enumerate(node.cases):
+            self.builder.position_at_end(case_blocks[i])
+            self.visit(case.body)
+            if not self.builder.block.is_terminated:
+                self.builder.branch(end_block)
+        # Emit default body
+        if node.default:
+            self.builder.position_at_end(default_block)
+            self.visit(node.default.body)
+            if not self.builder.block.is_terminated:
+                self.builder.branch(end_block)
+        self.builder.position_at_end(end_block)
+
+    def visit_CaseStmt(self, node: CaseStmt) -> None:
+        """Generate IR for a case statement (body only, handled in SwitchStmt)."""
+        self.visit(node.body)

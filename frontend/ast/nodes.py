@@ -1,6 +1,7 @@
 import logging
 from dataclasses import dataclass
 from typing import List, Optional, Union, Any
+from enum import Enum
 
 class Node:
     """Base class for all AST nodes."""
@@ -448,6 +449,7 @@ class ArrayDecl(Declaration):
     name: str
     type: Type
     size: int
+    init: Optional[Expression] = None
 
     def _validate(self):
         super()._validate()
@@ -458,6 +460,8 @@ class ArrayDecl(Declaration):
             raise TypeError(f"ArrayDecl type must be a Type, got {type(self.type)}")
         if not isinstance(self.size, int):
             raise TypeError(f"ArrayDecl size must be an integer, got {type(self.size)}")
+        if self.init is not None and not isinstance(self.init, Expression):
+            raise TypeError(f"ArrayDecl init must be an Expression or None, got {type(self.init)}")
 
 @dataclass
 class FunctionPointer(Expression):
@@ -475,3 +479,167 @@ class FunctionPointer(Expression):
         for param_type in self.param_types:
             if not isinstance(param_type, Type):
                 raise TypeError(f"FunctionPointer param_type must be a Type, got {type(param_type)}")
+
+@dataclass
+class ArrayIndex(Expression):
+    """Represents array indexing (a[i])."""
+    array: Expression
+    index: Expression
+
+    def _validate(self):
+        super()._validate()
+        self.logger.debug(f"Validating ArrayIndex node: {self.array}[{self.index}]")
+        if not isinstance(self.array, Expression):
+            raise TypeError(f"ArrayIndex array must be an Expression, got {type(self.array)}")
+        if not isinstance(self.index, Expression):
+            raise TypeError(f"ArrayIndex index must be an Expression, got {type(self.index)}")
+
+@dataclass
+class DoWhileStmt(Statement):
+    """Represents a do-while statement."""
+    body: Statement
+    condition: Expression
+
+    def _validate(self):
+        super()._validate()
+        self.logger.debug("Validating DoWhileStmt node")
+        if not isinstance(self.body, Statement):
+            raise TypeError(f"DoWhileStmt body must be a Statement, got {type(self.body)}")
+        if not isinstance(self.condition, Expression):
+            raise TypeError(f"DoWhileStmt condition must be an Expression, got {type(self.condition)}")
+
+@dataclass
+class SwitchStmt(Statement):
+    """Represents a switch statement."""
+    expression: Expression
+    cases: list
+    default: Optional['CaseStmt'] = None
+
+    def _validate(self):
+        super()._validate()
+        self.logger.debug("Validating SwitchStmt node")
+        if not isinstance(self.expression, Expression):
+            raise TypeError(f"SwitchStmt expression must be an Expression, got {type(self.expression)}")
+        if not isinstance(self.cases, list):
+            raise TypeError(f"SwitchStmt cases must be a list, got {type(self.cases)}")
+        if self.default is not None and not isinstance(self.default, CaseStmt):
+            raise TypeError(f"SwitchStmt default must be a CaseStmt or None, got {type(self.default)}")
+
+@dataclass
+class CaseStmt(Statement):
+    """Represents a case in a switch statement."""
+    value: Optional[Expression]  # None for default
+    body: Statement
+
+    def _validate(self):
+        super()._validate()
+        self.logger.debug("Validating CaseStmt node")
+        if self.value is not None and not isinstance(self.value, Expression):
+            raise TypeError(f"CaseStmt value must be an Expression or None, got {type(self.value)}")
+        if not isinstance(self.body, Statement):
+            raise TypeError(f"CaseStmt body must be a Statement, got {type(self.body)}")
+
+@dataclass
+class StructPointerAccess(Expression):
+    """Represents pointer access to a struct member (a->b)."""
+    base: Expression
+    member: str
+
+    def _validate(self):
+        super()._validate()
+        self.logger.debug(f"Validating StructPointerAccess node: {self.base}->{self.member}")
+        if not isinstance(self.base, Expression):
+            raise TypeError(f"StructPointerAccess base must be an Expression, got {type(self.base)}")
+        if not isinstance(self.member, str):
+            raise TypeError(f"StructPointerAccess member must be a string, got {type(self.member)}")
+
+class StorageClass(Enum):
+    AUTO = 'auto'
+    STATIC = 'static'
+    EXTERN = 'extern'
+    REGISTER = 'register'
+
+@dataclass
+class CastExpr(Expression):
+    """Represents an explicit type cast."""
+    target_type: Type
+    expr: Expression
+    def _validate(self):
+        super()._validate()
+        self.logger.debug(f"Validating CastExpr node: ({self.target_type}){self.expr}")
+        if not isinstance(self.target_type, Type):
+            raise TypeError(f"CastExpr target_type must be a Type, got {type(self.target_type)}")
+        if not isinstance(self.expr, Expression):
+            raise TypeError(f"CastExpr expr must be an Expression, got {type(self.expr)}")
+
+@dataclass
+class TernaryOp(Expression):
+    """Represents a ternary (?:) operator."""
+    condition: Expression
+    true_expr: Expression
+    false_expr: Expression
+    def _validate(self):
+        super()._validate()
+        self.logger.debug("Validating TernaryOp node")
+        if not isinstance(self.condition, Expression):
+            raise TypeError(f"TernaryOp condition must be an Expression, got {type(self.condition)}")
+        if not isinstance(self.true_expr, Expression):
+            raise TypeError(f"TernaryOp true_expr must be an Expression, got {type(self.true_expr)}")
+        if not isinstance(self.false_expr, Expression):
+            raise TypeError(f"TernaryOp false_expr must be an Expression, got {type(self.false_expr)}")
+
+@dataclass
+class SizeofExpr(Expression):
+    """Represents a sizeof expression."""
+    expr: Expression
+    def _validate(self):
+        super()._validate()
+        self.logger.debug("Validating SizeofExpr node")
+        if not isinstance(self.expr, Expression):
+            raise TypeError(f"SizeofExpr expr must be an Expression, got {type(self.expr)}")
+
+@dataclass
+class IncrementOp(Expression):
+    """Represents ++ or -- (prefix or postfix)."""
+    op: str
+    expr: Expression
+    is_postfix: bool = False
+    def _validate(self):
+        super()._validate()
+        self.logger.debug(f"Validating IncrementOp node: {self.op}{self.expr}")
+        if not isinstance(self.op, str):
+            raise TypeError(f"IncrementOp op must be a string, got {type(self.op)}")
+        if not isinstance(self.expr, Expression):
+            raise TypeError(f"IncrementOp expr must be an Expression, got {type(self.expr)}")
+
+@dataclass
+class BitwiseOp(Expression):
+    """Represents a bitwise operation (&, |, ^, ~, <<, >>)."""
+    op: str
+    left: Expression
+    right: Optional[Expression] = None
+    def _validate(self):
+        super()._validate()
+        self.logger.debug(f"Validating BitwiseOp node: {self.op}")
+        if not isinstance(self.op, str):
+            raise TypeError(f"BitwiseOp op must be a string, got {type(self.op)}")
+        if not isinstance(self.left, Expression):
+            raise TypeError(f"BitwiseOp left must be an Expression, got {type(self.left)}")
+        if self.right is not None and not isinstance(self.right, Expression):
+            raise TypeError(f"BitwiseOp right must be an Expression or None, got {type(self.right)}")
+
+@dataclass
+class AssignmentOp(Expression):
+    """Represents a compound assignment (+=, -=, etc.)."""
+    op: str
+    left: Expression
+    right: Expression
+    def _validate(self):
+        super()._validate()
+        self.logger.debug(f"Validating AssignmentOp node: {self.op}")
+        if not isinstance(self.op, str):
+            raise TypeError(f"AssignmentOp op must be a string, got {type(self.op)}")
+        if not isinstance(self.left, Expression):
+            raise TypeError(f"AssignmentOp left must be an Expression, got {type(self.left)}")
+        if not isinstance(self.right, Expression):
+            raise TypeError(f"AssignmentOp right must be an Expression, got {type(self.right)}")

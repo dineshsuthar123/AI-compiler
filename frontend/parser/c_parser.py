@@ -65,13 +65,28 @@ class ASTBuilder(CListener):
     
     def enterDeclarator(self, ctx):
         """Enter a parse tree produced by CParser.declarator."""
-        # Handle pointer types
-        if '*' in ctx.getText():
-            self.warn("Pointer types are not fully supported yet. They will be parsed as 'int' for now.")
-        pass
+        # Improved pointer type handling
+        pointer_depth = ctx.getText().count('*')
+        is_pointer = pointer_depth > 0
+        # Set pointer info on current node if it's a variable or parameter
+        if isinstance(self.current_node, (VariableDecl, Parameter)):
+            self.current_node.type.is_pointer = is_pointer
+            self.current_node.type.pointer_depth = pointer_depth
+        # No warning needed; pointer types are now supported
     
     def exitDeclarator(self, ctx):
-        pass
+        # Handle array declarations
+        if ctx.getChildCount() >= 4 and ctx.getChild(1).getText() == '[':
+            # e.g., int a[10];
+            var_name = ctx.Identifier().getText()
+            size_text = ctx.getChild(2).getText()
+            try:
+                size = int(size_text)
+            except Exception:
+                size = 0
+            array_decl = ArrayDecl(name=var_name, type=Type(name='int'), size=size)
+            if isinstance(self.current_node, CompoundStmt):
+                self.current_node.statements.append(array_decl)
     
     def enterDirectDeclarator(self, ctx):
         """Enter a parse tree produced by CParser.directDeclarator."""
@@ -95,22 +110,24 @@ class ASTBuilder(CListener):
         """Enter a parse tree produced by CParser.parameterDeclaration."""
         param_type = Type(name='int')  # Default to int for now
         param = Parameter(name='', type=param_type)
-          # Get type from declaration specifiers
+        # Get type from declaration specifiers
         for child in ctx.declarationSpecifiers().getChildren():
             if isinstance(child, AntlrCParser.TypeSpecifierContext):
                 type_name = child.getText().replace('*', '').strip()
-                is_pointer = '*' in child.getText()
-                param.type = Type(name=type_name, is_pointer=is_pointer)
+                pointer_depth = child.getText().count('*')
+                is_pointer = pointer_depth > 0
+                param.type = Type(name=type_name, is_pointer=is_pointer, pointer_depth=pointer_depth)
                 break
-        
         # Get name from declarator if present
         if ctx.declarator():
             direct_decl = ctx.declarator().directDeclarator()
             if direct_decl and direct_decl.Identifier():
                 param.name = direct_decl.Identifier().getText()
             # Detect pointer in declarator (e.g., int *a)
-            if '*' in ctx.declarator().getText():
-                param.type.is_pointer = True        
+            pointer_depth = ctx.declarator().getText().count('*')
+            if pointer_depth > 0:
+                param.type.is_pointer = True
+                param.type.pointer_depth = pointer_depth
         if isinstance(self.current_node, FunctionDecl):
             self.current_node.parameters.append(param)
     
@@ -142,6 +159,7 @@ class ASTBuilder(CListener):
         
         # Get type from declaration specifiers
         type_name = 'int'  # Default to int
+        pointer_depth = 0
         for child in ctx.declarationSpecifiers().getChildren():
             if isinstance(child, AntlrCParser.TypeSpecifierContext):
                 type_spec_text = child.getText()
@@ -150,7 +168,8 @@ class ASTBuilder(CListener):
                 if type_spec_text.startswith('struct'):
                     type_name = type_spec_text  # e.g., "structPoint" or "struct Point"
                 else:
-                    type_name = type_spec_text
+                    type_name = type_spec_text.replace('*', '').strip()
+                pointer_depth = type_spec_text.count('*')
                 break        
         print(f"Determined type name: {type_name}")
         
@@ -170,7 +189,7 @@ class ASTBuilder(CListener):
                     print(f"Creating variable: {var_name} of type {type_name}")
                     var_decl = VariableDecl(
                         name=var_name,
-                        type=Type(name=type_name),
+                        type=Type(name=type_name, is_pointer=(pointer_depth > 0), pointer_depth=pointer_depth),
                         init=None
                     )
                     
@@ -444,6 +463,14 @@ class ASTBuilder(CListener):
                         else:
                             self.expr_stack[-1].append(member_access)
                     
+            # Handle struct pointer access: a->b
+            if ctx.getChildCount() == 3 and ctx.getChild(1).getText() == '->':
+                base_expr = self.safe_pop(self.expr_stack)
+                member_name = ctx.getChild(2).getText()
+                struct_ptr_access = StructPointerAccess(base=base_expr, member=member_name)
+                if self.expr_stack:
+                    self.expr_stack[-1].append(struct_ptr_access)
+            
         elif self.expr_stack[-1]:
             expr = self.expr_stack[-1].pop()
             if len(self.expr_stack) > 1:
@@ -784,35 +811,32 @@ class ASTBuilder(CListener):
     
     def enterUnaryExpression(self, ctx):
         """Enter a parse tree produced by CParser.unaryExpression."""
-        print(f"Entering unary expression: {ctx.getText()}")
-        
-        # Check if this is a unary operator + expression
+        # All unary operators handled; push to expr_stack for all cases
         if ctx.unaryOperator() and len(ctx.children) == 2:
-            # This will be handled in exitUnaryExpression
             self.expr_stack.append([])
     
     def exitUnaryExpression(self, ctx):
         """Exit a parse tree produced by CParser.unaryExpression."""
-        print(f"Exiting unary expression: {ctx.getText()}")
-        
-        # Check if this is a unary operator + expression  
+        # Handle increment/decrement (++/--)
+        if ctx.getChildCount() == 2 and ctx.getChild(0).getText() in ('++', '--'):
+            op = ctx.getChild(0).getText()
+            expr = self.safe_pop(self.expr_stack)
+            inc = IncrementOp(op=op, expr=expr, is_postfix=False)
+            if self.expr_stack:
+                self.expr_stack[-1].append(inc)
+        elif ctx.getChildCount() == 2 and ctx.getChild(1).getText() in ('++', '--'):
+            op = ctx.getChild(1).getText()
+            expr = self.safe_pop(self.expr_stack)
+            inc = IncrementOp(op=op, expr=expr, is_postfix=True)
+            if self.expr_stack:
+                self.expr_stack[-1].append(inc)
+        # Handle all unary operators
         if ctx.unaryOperator() and len(ctx.children) == 2:
-            # Get the operator
             operator_text = ctx.unaryOperator().getText()
-            print(f"Found unary operator: {operator_text}")
-            
-            # Get the operand expression
             operand_expr = self.safe_pop(self.expr_stack)
-            print(f"Operand expression: {operand_expr}")
-            
-            # Create UnaryOp node
             unary_op = UnaryOp(op=operator_text, operand=operand_expr)
-            print(f"Created unary operation: {unary_op}")
-            
-            # Add to parent expression stack
             if self.expr_stack:
                 self.expr_stack[-1].append(unary_op)
-                print(f"Current expression stack: {self.expr_stack}")
     
     def enterUnaryOperator(self, ctx):
         """Enter a parse tree produced by CParser.unaryOperator."""
@@ -823,6 +847,58 @@ class ASTBuilder(CListener):
         """Exit a parse tree produced by CParser.unaryOperator."""
         print(f"Exiting unary operator: {ctx.getText()}")
         # No action needed - handled in exitUnaryExpression
+
+    def exitCastExpression(self, ctx):
+        # Handle explicit casts: (type)expr
+        if ctx.getChildCount() == 4 and ctx.getChild(0).getText() == '(':  # (type) expr
+            type_name = ctx.getChild(1).getText()
+            expr = self.safe_pop(self.expr_stack)
+            cast_expr = CastExpr(target_type=Type(name=type_name), expr=expr)
+            if self.expr_stack:
+                self.expr_stack[-1].append(cast_expr)
+
+    def exitConditionalExpression(self, ctx):
+        # Handle ternary operator: cond ? true_expr : false_expr
+        if ctx.getChildCount() == 5 and ctx.getChild(1).getText() == '?':
+            cond = self.safe_pop(self.expr_stack)
+            true_expr = self.safe_pop(self.expr_stack)
+            false_expr = self.safe_pop(self.expr_stack)
+            ternary = TernaryOp(condition=cond, true_expr=true_expr, false_expr=false_expr)
+            if self.expr_stack:
+                self.expr_stack[-1].append(ternary)
+
+    def exitBitwiseExpression(self, ctx):
+        # Handle bitwise ops (&, |, ^, ~, <<, >>)
+        if ctx.getChildCount() == 3:
+            left = self.safe_pop(self.expr_stack)
+            right = self.safe_pop(self.expr_stack)
+            op = ctx.getChild(1).getText()
+            bitwise = BitwiseOp(op=op, left=left, right=right)
+            if self.expr_stack:
+                self.expr_stack[-1].append(bitwise)
+        elif ctx.getChildCount() == 2 and ctx.getChild(0).getText() == '~':
+            expr = self.safe_pop(self.expr_stack)
+            bitwise = BitwiseOp(op='~', left=expr)
+            if self.expr_stack:
+                self.expr_stack[-1].append(bitwise)
+
+    def exitAssignmentExpression(self, ctx):
+        # Handle compound assignment (+=, -=, etc.)
+        if ctx.getChildCount() == 3 and ctx.getChild(1).getText() in ('+=', '-=', '*=', '/=', '&=', '|=', '^=', '<<=', '>>='):
+            left = self.safe_pop(self.expr_stack)
+            right = self.safe_pop(self.expr_stack)
+            op = ctx.getChild(1).getText()
+            assign = AssignmentOp(op=op, left=left, right=right)
+            if self.expr_stack:
+                self.expr_stack[-1].append(assign)
+
+    def exitSizeofExpression(self, ctx):
+        # Handle sizeof(expr)
+        if ctx.getChildCount() == 4 and ctx.getChild(0).getText() == 'sizeof':
+            expr = self.safe_pop(self.expr_stack)
+            sizeof_expr = SizeofExpr(expr=expr)
+            if self.expr_stack:
+                self.expr_stack[-1].append(sizeof_expr)
 
 # === TODO: FULL C SUPPORT STUBS ===
 # TODO: Support for struct/union/enum/typedef parsing

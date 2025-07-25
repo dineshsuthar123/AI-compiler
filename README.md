@@ -10,6 +10,29 @@
 
 **A next-generation, production-ready C compiler that harnesses the power of artificial intelligence for intelligent compilation, optimization, and code analysis.**
 
+🌐 **[Live Demo](https://your-deployment-url.vercel.app)** | 📖 [Documentation](#-quick-start) | 🚀 [Deploy Your Own](VERCEL_DEPLOYMENT.md)
+
+</div>
+
+## 🎯 Live Demo & Deployment
+
+### 🌟 **Try It Now: [AI Compiler Frontend](https://your-deployment-url.vercel.app)**
+
+**Current Status**: 🔧 Frontend Demo Live | 🔄 Full Backend In Development
+
+- ✅ **Modern Web Interface**: Beautiful, responsive design with real-time code editing
+- ✅ **Syntax Highlighting**: Full C language support with CodeMirror integration  
+- ✅ **Mock Compilation**: Demonstrates the complete compilation workflow
+- ✅ **Example Programs**: Pre-built C programs to test the interface
+- 🔄 **AI Features**: Interface ready, backend integration coming soon
+- 🔄 **Real Compilation**: Python + LLVM backend in active development
+
+> **📝 Note**: The live demo currently shows the frontend interface with mock compilation responses. The full AI-powered backend with real C compilation, LLVM IR generation, and AI optimizations is under active development.
+
+**Want to deploy your own?** Follow the [Vercel Deployment Guide](VERCEL_DEPLOYMENT.md)
+
+---
+
 [Features](#-features) • [Quick Start](#-quick-start) • [Examples](#-examples) • [Architecture](#-architecture) • [Contributing](#-contributing)
 
 </div>
