@@ -16,7 +16,7 @@
 
 ## 🎯 Live Demo & Deployment
 
-### 🌟 **Try It Now: [AI Compiler Frontend](https://your-deployment-url.vercel.app)**
+### 🌟 **Try It Now: [AI Compiler Frontend](https://deployment-url.vercel.app)**
 
 **Current Status**: 🔧 Frontend Demo Live | 🔄 Full Backend In Development
 
@@ -78,7 +78,7 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/ai-compiler.git
+git clone https://github.com/dineshsuthar123/ai-compiler.git
 cd ai-compiler
 
 # Create and activate virtual environment
@@ -353,7 +353,7 @@ We welcome contributions! Here's how to get started:
 1. **Fork** the repository
 2. **Clone** your fork:
    ```bash
-   git clone https://github.com/yourusername/ai-compiler.git
+   git clone https://github.com/dineshsuthar/ai-compiler.git
    ```
 3. **Create** a feature branch:
    ```bash
@@ -437,8 +437,8 @@ pip install -r requirements.txt
 ### Getting Help
 
 - 📖 Check the [Usage Guide](#-usage-guide)
-- 🐛 [Report Issues](https://github.com/yourusername/ai-compiler/issues)
-- 💬 [Join Discussions](https://github.com/yourusername/ai-compiler/discussions)
+- 🐛 [Report Issues](https://github.com/dineshsuthar123/ai-compiler/issues)
+- 💬 [Join Discussions](https://github.com/dineshsuthar123/ai-compiler/discussions)
 
 ---
 
@@ -461,6 +461,6 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 
 **Built with ❤️ by the AI Compiler Team**
 
-[⭐ Star us on GitHub](https://github.com/yourusername/ai-compiler) • [🐛 Report Bug](https://github.com/yourusername/ai-compiler/issues) • [💡 Request Feature](https://github.com/yourusername/ai-compiler/issues)
+[⭐ Star us on GitHub](https://github.com/dineshsuthar123/ai-compiler) • [🐛 Report Bug](https://github.com/dineshsuthar123/ai-compiler/issues) • [💡 Request Feature](https://github.com/dineshsuthar123/ai-compiler/issues)
 
 </div>
