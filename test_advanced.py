@@ -6,7 +6,7 @@ def test_advanced_features():
     """Test advanced C features step by step."""
     compiler = ModernCompiler()
     
-    tests = [
+    tests = [ 
         {
             'name': 'Basic floating-point',
             'code': '''#include <stdio.h>
