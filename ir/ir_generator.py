@@ -43,22 +43,29 @@ class IRGenerator:
         """Create a string constant in the LLVM module."""
         # Process escape sequences correctly for LLVM IR
         # Convert C-style escape sequences to actual characters
-        processed_value = value.replace('\\n', '\n').replace('\\t', '\t').replace('\\r', '\r').replace('\\\\', '\\')
-        
+        processed_value = (
+            value.replace('\\n', '\n')
+                 .replace('\\t', '\t')
+                 .replace('\\r', '\r')
+                 .replace('\\\\', '\\')
+        )
+
         # Add null terminator
         str_val = processed_value + "\0"
-        
+
         # Create a global string constant with correct size
         str_bytes = str_val.encode("utf-8")
         str_type = ir.ArrayType(ir.IntType(8), len(str_bytes))
         str_const = ir.Constant(str_type, bytearray(str_bytes))
-        
-        # Create a global variable for the string
-        str_global = ir.GlobalVariable(self.module, str_type, ".str")
+
+        # Create a global variable for the string (unique name per literal)
+        name = f".str.{self.string_counter}"
+        self.string_counter += 1
+        str_global = ir.GlobalVariable(self.module, str_type, name)
         str_global.linkage = "private"
         str_global.global_constant = True
         str_global.initializer = str_const
-        
+
         # Return a pointer to the string
         return str_global.gep([ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 0)])
     
