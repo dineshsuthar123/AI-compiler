@@ -1,4 +1,9 @@
 from flask import Flask, render_template, request, jsonify, send_file
+import os, sys
+# Ensure project root is on sys.path for local imports
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 from simple_compiler import ModernCompiler
 import logging
 import json
