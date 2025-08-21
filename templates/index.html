@@ -1138,6 +1138,7 @@ int main() {
         }
 
         function showCompileSuccess(result) {
+            const outputValue = (result.result !== undefined) ? result.result : ((result.output !== undefined) ? result.output : '');
             const outputHtml = `
                 <div class="status-message status-success">
                     <i class="fas fa-check-circle"></i>
@@ -1147,7 +1148,7 @@ int main() {
                     <strong>Execution Output:</strong>
                 </div>
                 <div style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
-                    <pre style="margin: 0; white-space: pre-wrap;">${escapeHtml(result.result || result.output || 'No output')}</pre>
+            <pre style="margin: 0; white-space: pre-wrap;">${escapeHtml(outputValue)}</pre>
                 </div>
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
                     <div style="background: rgba(0,212,255,0.1); padding: 0.5rem; border-radius: 6px;">
