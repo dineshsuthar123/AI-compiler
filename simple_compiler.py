@@ -53,9 +53,13 @@ class ModernCompiler:
             self.logger.info("Program output: %s", stdout)
         return formatted
 
-    def compile_and_execute(self, source: str, optimization_level: int = 0, ai_enhanced: bool = False) -> Dict[str, Any]:
+    def generate_ir_only(self, source: str) -> str:
+        """Generate IR without executing the program."""
+        return self.compile(source, execute=False)
+
+    def compile_and_execute(self, source: str, optimization_level: int = 0, ai_enhanced: bool = False, stdin: str | bytes | None = None) -> Dict[str, Any]:
         ir_code = self.compile(source, execute=False)
-        exit_code, stdout = self.ir_executor.execute(str(self.ir_generator.module))
+        exit_code, stdout = self.ir_executor.execute(str(self.ir_generator.module), stdin_data=stdin)
         return {
             'success': True,
             'ir_code': ir_code,

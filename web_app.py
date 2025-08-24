@@ -10,10 +10,11 @@ import json
 import time
 import os
 import sys
+import importlib
 try:
-    import psutil
+    psutil = importlib.import_module('psutil')
     PSUTIL_AVAILABLE = True
-except ImportError:
+except Exception:
     PSUTIL_AVAILABLE = False
     psutil = None
 from datetime import datetime
@@ -394,31 +395,32 @@ def compile_code():
     try:
         data = request.json
         logger.info(f"Received compilation request: {data}")
-        
+
         code = data.get('code', '')
         config = data.get('config', {})
         session_id = data.get('session_id', str(uuid.uuid4()))
-        
-        # Extract optimization settings from request
+
+        # Extract optimization settings from request and optional stdin
         optimization_level = data.get('optimization_level', 0)
         ai_enhanced = data.get('ai_enhanced', False)
-        
+        stdin_text = data.get('stdin', '')
+
         logger.info(f"Optimization level: {optimization_level}, AI enhanced: {ai_enhanced}")
         logger.info(f"Code length: {len(code)} characters")
-        
+
         if not code.strip():
             return jsonify({'success': False, 'error': 'No code provided'})
-        
+
         # Update compiler configuration with optimization settings
         compiler.config.update(config)
         compiler.config['optimization_level'] = optimization_level
         compiler.config['ai_enhanced'] = ai_enhanced
-        
+
         # Track compilation start
         start_time = time.time()
         real_time_stats['total_compilations'] = real_time_stats.get('total_compilations', 0) + 1
         real_time_stats['active_sessions'] = real_time_stats.get('active_sessions', 0) + 1
-        
+
         # Store session info
         active_sessions[session_id] = {
             'start_time': start_time,
@@ -427,26 +429,32 @@ def compile_code():
             'optimization_level': optimization_level,
             'ai_enhanced': ai_enhanced
         }
-          # Compile and execute the code
+
+        # Compile and execute the code
         logger.info("Starting compilation with compiler.compile_and_execute()")
         try:
-            compilation_result = compiler.compile_and_execute(code)
+            compilation_result = compiler.compile_and_execute(
+                code,
+                optimization_level=optimization_level,
+                ai_enhanced=ai_enhanced,
+                stdin=stdin_text,
+            )
         except Exception as e:
             import traceback
             tb = traceback.format_exc()
             logger.error(f"Unhandled exception during compile_and_execute: {tb}")
             return jsonify({'success': False, 'error': tb, 'message': 'Unhandled exception occurred'}), 500
-        
+
         logger.info(f"Compilation result: {compilation_result}")
-        
+
         # Calculate compilation time
         compile_time = time.time() - start_time
-        
+
         # Update stats
         real_time_stats['last_compile_time'] = compile_time
         real_time_stats['average_compile_time'] = real_time_stats.get('average_compile_time', compile_time)
         real_time_stats['active_sessions'] = real_time_stats.get('active_sessions', 1) - 1
-        
+
         # Store in compilation history
         compilation_entry = {
             'id': session_id,
@@ -459,17 +467,17 @@ def compile_code():
             'ai_enhanced': ai_enhanced
         }
         compilation_history.append(compilation_entry)
-        
+
         # Keep only last 100 entries
         if len(compilation_history) > 100:
             compilation_history.pop(0)
-        
+
         # Clean up session
         if session_id in active_sessions:
             del active_sessions[session_id]
         if compilation_result['success']:
             return jsonify({
-                'success': True, 
+                'success': True,
                 'result': compilation_result.get('output', ''),  # Return actual program output
                 'compile_time': round(compile_time * 1000, 2),  # Return time in milliseconds
                 'compilation_time': round(compile_time * 1000, 2),  # Add this for frontend compatibility
@@ -488,18 +496,18 @@ def compile_code():
                 'compilation_time': round(compile_time * 1000, 2),
                 'session_id': session_id
             })
-        
+
     except Exception as e:
         logger.error(f"Compilation error: {str(e)}")
-        
+
         # Update error stats
         real_time_stats['total_errors'] = real_time_stats.get('total_errors', 0) + 1
         real_time_stats['active_sessions'] = real_time_stats.get('active_sessions', 1) - 1
-        
+
         # Clean up session on error
         if 'session_id' in locals() and session_id in active_sessions:
             del active_sessions[session_id]
-        
+
         return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/get-ir', methods=['POST'])

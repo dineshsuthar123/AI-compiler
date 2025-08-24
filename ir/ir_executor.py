@@ -57,19 +57,24 @@ class IRExecutor:
             # Non-fatal: execution may still work if the platform resolves symbols implicitly
             pass
     
-    def execute(self, ir_code: str):
-        """Execute LLVM IR code, capturing stdout.
-        
+    def execute(self, ir_code: str, stdin_data: str | bytes | None = None):
+        """Execute LLVM IR code, capturing stdout and providing optional stdin.
+
         Args:
             ir_code: LLVM IR code to execute
-            
+            stdin_data: Optional string/bytes to feed to the program via stdin
+
         Returns:
             Tuple of (exit_code: int, stdout: str)
         """
         mod = None
         tmp_path = None
         saved_stdout_fd = None
+        stdin_tmp_path = None
+        saved_stdin_fd = None
         windows_redirect_used = False
+        windows_stdin_redirect_used = False
+
         try:
             # Parse the IR code
             mod = llvm.parse_assembly(ir_code)
@@ -84,6 +89,8 @@ class IRExecutor:
 
             # Get the main function
             main_addr = self.engine.get_function_address("main")
+            if not main_addr:
+                raise RuntimeError("No 'main' function found in the module")
             main_func = ctypes.CFUNCTYPE(ctypes.c_int)(main_addr)
 
             # Prepare stdout capture
@@ -100,13 +107,31 @@ class IRExecutor:
             fd, tmp_path = tempfile.mkstemp(prefix="jit_stdout_", suffix=".txt")
             os.close(fd)
 
+            # Prepare stdin capture (provide data if any; use empty file to avoid blocking)
+            fd_in, stdin_tmp_path = tempfile.mkstemp(prefix="jit_stdin_", suffix=".txt")
+            os.close(fd_in)
+            try:
+                data_bytes = b""
+                if stdin_data is not None:
+                    if isinstance(stdin_data, str):
+                        data_bytes = stdin_data.encode("utf-8")
+                    elif isinstance(stdin_data, (bytes, bytearray)):
+                        data_bytes = bytes(stdin_data)
+                with open(stdin_tmp_path, "wb") as fin:
+                    fin.write(data_bytes)
+            except Exception:
+                pass
+
+            # Redirect stdout and stdin
             if os.name == "nt" and self.libc is not None:
                 # Windows: redirect MSVCRT stdout using _open_osfhandle + _dup2
                 try:
                     kernel32 = ctypes.windll.kernel32
                     GENERIC_WRITE = 0x40000000
+                    GENERIC_READ = 0x80000000
                     FILE_SHARE_READ = 0x00000001
                     CREATE_ALWAYS = 2
+                    OPEN_EXISTING = 3
                     FILE_ATTRIBUTE_NORMAL = 0x00000080
                     INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
 
@@ -144,13 +169,48 @@ class IRExecutor:
                 except Exception:
                     windows_redirect_used = False
 
+                # Redirect stdin for MSVCRT
+                try:
+                    hIn = kernel32.CreateFileW(stdin_tmp_path, GENERIC_READ, FILE_SHARE_READ, None,
+                                               OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, None)
+                    if hIn and hIn != INVALID_HANDLE_VALUE:
+                        _open_osfhandle = self.libc._open_osfhandle
+                        _open_osfhandle.argtypes = [ctypes.c_void_p, ctypes.c_int]
+                        _open_osfhandle.restype = ctypes.c_int
+
+                        _dup = self.libc._dup
+                        _dup.argtypes = [ctypes.c_int]
+                        _dup.restype = ctypes.c_int
+
+                        _dup2 = self.libc._dup2
+                        _dup2.argtypes = [ctypes.c_int, ctypes.c_int]
+                        _dup2.restype = ctypes.c_int
+
+                        msvcrt_in_fd = _open_osfhandle(hIn, 0)
+                        saved_stdin_fd = _dup(0)
+                        if msvcrt_in_fd >= 0 and saved_stdin_fd >= 0:
+                            if _dup2(msvcrt_in_fd, 0) == 0:
+                                windows_stdin_redirect_used = True
+                    else:
+                        windows_stdin_redirect_used = False
+                except Exception:
+                    windows_stdin_redirect_used = False
+
             if not windows_redirect_used:
-                # POSIX-compatible dup2 fallback
+                # POSIX-compatible dup2 fallback for stdout
                 fd_stdout = 1
                 saved_stdout_fd = os.dup(fd_stdout)
                 cap_fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
                 os.dup2(cap_fd, fd_stdout)
                 os.close(cap_fd)
+
+            if not windows_stdin_redirect_used:
+                # POSIX-compatible stdin redirect
+                fd_stdin = 0
+                saved_stdin_fd = os.dup(fd_stdin)
+                in_fd = os.open(stdin_tmp_path, os.O_RDONLY)
+                os.dup2(in_fd, fd_stdin)
+                os.close(in_fd)
 
             # Execute the main function
             exit_code = main_func()
@@ -178,11 +238,35 @@ class IRExecutor:
                 except Exception:
                     pass
             else:
+                if saved_stdout_fd is not None:
+                    try:
+                        os.dup2(saved_stdout_fd, 1)
+                    finally:
+                        os.close(saved_stdout_fd)
+                        saved_stdout_fd = None
+
+            # Restore original stdin
+            if windows_stdin_redirect_used and os.name == "nt" and self.libc is not None:
                 try:
-                    os.dup2(saved_stdout_fd, 1)
-                finally:
-                    os.close(saved_stdout_fd)
-                    saved_stdout_fd = None
+                    _dup2 = self.libc._dup2
+                    _dup2.argtypes = [ctypes.c_int, ctypes.c_int]
+                    _dup2.restype = ctypes.c_int
+                    _close = self.libc._close
+                    _close.argtypes = [ctypes.c_int]
+                    _close.restype = ctypes.c_int
+                    if saved_stdin_fd is not None and saved_stdin_fd >= 0:
+                        _dup2(saved_stdin_fd, 0)
+                        _close(saved_stdin_fd)
+                        saved_stdin_fd = None
+                except Exception:
+                    pass
+            else:
+                if saved_stdin_fd is not None:
+                    try:
+                        os.dup2(saved_stdin_fd, 0)
+                    finally:
+                        os.close(saved_stdin_fd)
+                        saved_stdin_fd = None
 
             # Read captured output
             stdout_data = ""
@@ -191,37 +275,63 @@ class IRExecutor:
                     stdout_data = f.read().decode("utf-8", errors="replace")
             finally:
                 try:
-                    os.remove(tmp_path)
+                    if tmp_path and os.path.exists(tmp_path):
+                        os.remove(tmp_path)
+                except Exception:
+                    pass
+                try:
+                    if stdin_tmp_path and os.path.exists(stdin_tmp_path):
+                        os.remove(stdin_tmp_path)
                 except Exception:
                     pass
 
             return exit_code, stdout_data
-            
+
         except Exception as e:
             raise RuntimeError(f"Failed to execute LLVM IR: {str(e)}")
         finally:
             if mod is not None:
-                self.engine.remove_module(mod)
-            # Ensure stdout is restored even if an error occurs
-            try:
-                if windows_redirect_used and os.name == "nt" and self.libc is not None:
-                    _dup2 = self.libc._dup2
-                    _dup2.argtypes = [ctypes.c_int, ctypes.c_int]
-                    _dup2.restype = ctypes.c_int
-                    _close = self.libc._close
-                    _close.argtypes = [ctypes.c_int]
-                    _close.restype = ctypes.c_int
-                    if saved_stdout_fd is not None and saved_stdout_fd >= 0:
-                        _dup2(saved_stdout_fd, 1)
-                        _close(saved_stdout_fd)
-                        saved_stdout_fd = None
-                elif saved_stdout_fd is not None:
-                    os.dup2(saved_stdout_fd, 1)
-                    os.close(saved_stdout_fd)
-            except Exception:
-                pass
-            if tmp_path and os.path.exists(tmp_path):
                 try:
-                    os.remove(tmp_path)
+                    self.engine.remove_module(mod)
                 except Exception:
                     pass
+            # Best-effort restoration in case of early exceptions
+            try:
+                if os.name == "nt" and self.libc is not None:
+                    _dup2 = getattr(self.libc, "_dup2", None)
+                    _close = getattr(self.libc, "_close", None)
+                    if _dup2 and saved_stdout_fd is not None and saved_stdout_fd >= 0:
+                        _dup2(saved_stdout_fd, 1)
+                        if _close:
+                            _close(saved_stdout_fd)
+                        saved_stdout_fd = None
+                    if _dup2 and saved_stdin_fd is not None and saved_stdin_fd >= 0:
+                        _dup2(saved_stdin_fd, 0)
+                        if _close:
+                            _close(saved_stdin_fd)
+                        saved_stdin_fd = None
+                else:
+                    if saved_stdout_fd is not None:
+                        try:
+                            os.dup2(saved_stdout_fd, 1)
+                        finally:
+                            os.close(saved_stdout_fd)
+                        saved_stdout_fd = None
+                    if saved_stdin_fd is not None:
+                        try:
+                            os.dup2(saved_stdin_fd, 0)
+                        finally:
+                            os.close(saved_stdin_fd)
+                        saved_stdin_fd = None
+            except Exception:
+                pass
+            try:
+                if tmp_path and os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except Exception:
+                pass
+            try:
+                if stdin_tmp_path and os.path.exists(stdin_tmp_path):
+                    os.remove(stdin_tmp_path)
+            except Exception:
+                pass
